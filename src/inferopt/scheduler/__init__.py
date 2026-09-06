@@ -1,6 +1,6 @@
 """Request scheduling, prioritization, and admission control policies."""
 
-from inferopt.scheduler.config import SchedulerConfig
+from inferopt.scheduler.config import BatchConfig, SchedulerConfig
 from inferopt.scheduler.exceptions import (
     QueueFullError,
     RequestCancelledError,
@@ -13,6 +13,7 @@ from inferopt.scheduler.scheduler import AsyncScheduler, Scheduler
 
 __all__ = [
     "AsyncScheduler",
+    "BatchConfig",
     "QueueFullError",
     "RequestCancelledError",
     "RequestRecord",

@@ -1,0 +1,164 @@
+{
+  "scenario_name": "light",
+  "description": "Light workload: 10 requests with short factual queries",
+  "config": {
+    "scenario_name": "light",
+    "description": "Light workload: 10 requests with short factual queries",
+    "num_requests": 10,
+    "arrival_pattern": "CONCURRENT",
+    "arrival_rate_rps": null,
+    "seed": 42,
+    "prompt_categories": [
+      "SHORT",
+      "FACTUAL"
+    ],
+    "max_tokens": 32,
+    "priority_levels": [
+      0
+    ],
+    "concurrency": null
+  },
+  "requests": [
+    {
+      "request_id": "req-light-0000",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 32,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 0,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-light-0001",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 32,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 1,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-light-0002",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 0,
+      "max_tokens": 32,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 2,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-light-0003",
+      "model": "benchmark-model",
+      "prompt": "What is the primary function of an asynchronous event loop in Python?",
+      "priority": 0,
+      "max_tokens": 32,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 3,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-light-0004",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 32,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 4,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-light-0005",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 32,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 5,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-light-0006",
+      "model": "benchmark-model",
+      "prompt": "Describe the role of the Key-Value (KV) cache in autoregressive transformer inference.",
+      "priority": 0,
+      "max_tokens": 32,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 6,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-light-0007",
+      "model": "benchmark-model",
+      "prompt": "What is the primary function of an asynchronous event loop in Python?",
+      "priority": 0,
+      "max_tokens": 32,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 7,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-light-0008",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 32,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 8,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-light-0009",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 32,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 9,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    }
+  ],
+  "created_at": 1788730066.5832288
+}

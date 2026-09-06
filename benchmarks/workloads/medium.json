@@ -1,0 +1,725 @@
+{
+  "scenario_name": "medium",
+  "description": "Medium workload: 50 requests with mixed short/medium prompts at 10 RPS",
+  "config": {
+    "scenario_name": "medium",
+    "description": "Medium workload: 50 requests with mixed short/medium prompts at 10 RPS",
+    "num_requests": 50,
+    "arrival_pattern": "FIXED_RATE",
+    "arrival_rate_rps": 10.0,
+    "seed": 42,
+    "prompt_categories": [
+      "SHORT",
+      "MEDIUM",
+      "FACTUAL"
+    ],
+    "max_tokens": 64,
+    "priority_levels": [
+      0
+    ],
+    "concurrency": null
+  },
+  "requests": [
+    {
+      "request_id": "req-medium-0000",
+      "model": "benchmark-model",
+      "prompt": "Explain the difference between process and thread execution models in operating systems.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 0,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-medium-0001",
+      "model": "benchmark-model",
+      "prompt": "List three standard cache replacement policies and describe their trade-offs.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 1,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 100.0
+    },
+    {
+      "request_id": "req-medium-0002",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 2,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 200.0
+    },
+    {
+      "request_id": "req-medium-0003",
+      "model": "benchmark-model",
+      "prompt": "Explain the difference between process and thread execution models in operating systems.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 3,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 300.0
+    },
+    {
+      "request_id": "req-medium-0004",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 4,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 400.0
+    },
+    {
+      "request_id": "req-medium-0005",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 5,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 500.0
+    },
+    {
+      "request_id": "req-medium-0006",
+      "model": "benchmark-model",
+      "prompt": "Describe the role of the Key-Value (KV) cache in autoregressive transformer inference.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 6,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 600.0
+    },
+    {
+      "request_id": "req-medium-0007",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 7,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 700.0
+    },
+    {
+      "request_id": "req-medium-0008",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 8,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 800.0
+    },
+    {
+      "request_id": "req-medium-0009",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 9,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 900.0
+    },
+    {
+      "request_id": "req-medium-0010",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 10,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 1000.0
+    },
+    {
+      "request_id": "req-medium-0011",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 11,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 1100.0
+    },
+    {
+      "request_id": "req-medium-0012",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 12,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 1200.0
+    },
+    {
+      "request_id": "req-medium-0013",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 13,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 1300.0
+    },
+    {
+      "request_id": "req-medium-0014",
+      "model": "benchmark-model",
+      "prompt": "Explain the difference between process and thread execution models in operating systems.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 14,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 1400.0
+    },
+    {
+      "request_id": "req-medium-0015",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 15,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 1500.0
+    },
+    {
+      "request_id": "req-medium-0016",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 16,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 1600.0
+    },
+    {
+      "request_id": "req-medium-0017",
+      "model": "benchmark-model",
+      "prompt": "Explain the difference between process and thread execution models in operating systems.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 17,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 1700.0
+    },
+    {
+      "request_id": "req-medium-0018",
+      "model": "benchmark-model",
+      "prompt": "Describe the role of the Key-Value (KV) cache in autoregressive transformer inference.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 18,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 1800.0
+    },
+    {
+      "request_id": "req-medium-0019",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 19,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 1900.0
+    },
+    {
+      "request_id": "req-medium-0020",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 20,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 2000.0
+    },
+    {
+      "request_id": "req-medium-0021",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 21,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 2100.0
+    },
+    {
+      "request_id": "req-medium-0022",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 22,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 2200.0
+    },
+    {
+      "request_id": "req-medium-0023",
+      "model": "benchmark-model",
+      "prompt": "List three standard cache replacement policies and describe their trade-offs.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 23,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 2300.0
+    },
+    {
+      "request_id": "req-medium-0024",
+      "model": "benchmark-model",
+      "prompt": "What is Amdahl's Law and how does it apply to parallel computing limits?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 24,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 2400.0
+    },
+    {
+      "request_id": "req-medium-0025",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 25,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 2500.0
+    },
+    {
+      "request_id": "req-medium-0026",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 26,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 2600.0
+    },
+    {
+      "request_id": "req-medium-0027",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 27,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 2700.0
+    },
+    {
+      "request_id": "req-medium-0028",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 28,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 2800.0
+    },
+    {
+      "request_id": "req-medium-0029",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 29,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 2900.0
+    },
+    {
+      "request_id": "req-medium-0030",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 30,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 3000.0
+    },
+    {
+      "request_id": "req-medium-0031",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 31,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 3100.0
+    },
+    {
+      "request_id": "req-medium-0032",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 32,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 3200.0
+    },
+    {
+      "request_id": "req-medium-0033",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 33,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 3300.0
+    },
+    {
+      "request_id": "req-medium-0034",
+      "model": "benchmark-model",
+      "prompt": "List three standard cache replacement policies and describe their trade-offs.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 34,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 3400.0
+    },
+    {
+      "request_id": "req-medium-0035",
+      "model": "benchmark-model",
+      "prompt": "What is the distinction between prefill and decode phases during LLM token generation?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 35,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 3500.0
+    },
+    {
+      "request_id": "req-medium-0036",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 36,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 3600.0
+    },
+    {
+      "request_id": "req-medium-0037",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 37,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 3700.0
+    },
+    {
+      "request_id": "req-medium-0038",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 38,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 3800.0
+    },
+    {
+      "request_id": "req-medium-0039",
+      "model": "benchmark-model",
+      "prompt": "What is the distinction between prefill and decode phases during LLM token generation?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 39,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 3900.0
+    },
+    {
+      "request_id": "req-medium-0040",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 40,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 4000.0
+    },
+    {
+      "request_id": "req-medium-0041",
+      "model": "benchmark-model",
+      "prompt": "List three standard cache replacement policies and describe their trade-offs.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 41,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 4100.0
+    },
+    {
+      "request_id": "req-medium-0042",
+      "model": "benchmark-model",
+      "prompt": "Explain the difference between process and thread execution models in operating systems.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 42,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 4200.0
+    },
+    {
+      "request_id": "req-medium-0043",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 43,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 4300.0
+    },
+    {
+      "request_id": "req-medium-0044",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 44,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 4400.0
+    },
+    {
+      "request_id": "req-medium-0045",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 45,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 4500.0
+    },
+    {
+      "request_id": "req-medium-0046",
+      "model": "benchmark-model",
+      "prompt": "What is Amdahl's Law and how does it apply to parallel computing limits?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 46,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 4600.0
+    },
+    {
+      "request_id": "req-medium-0047",
+      "model": "benchmark-model",
+      "prompt": "List three standard cache replacement policies and describe their trade-offs.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 47,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 4700.0
+    },
+    {
+      "request_id": "req-medium-0048",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 48,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 4800.0
+    },
+    {
+      "request_id": "req-medium-0049",
+      "model": "benchmark-model",
+      "prompt": "What is the primary function of an asynchronous event loop in Python?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 49,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 4900.0
+    }
+  ],
+  "created_at": 1788730066.584384
+}

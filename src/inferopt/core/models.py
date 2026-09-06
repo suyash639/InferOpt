@@ -1,5 +1,6 @@
 """Core domain models for inference requests and responses."""
 
+import time
 import uuid
 from typing import Any
 
@@ -99,3 +100,47 @@ class InferenceResponse(BaseModel):
         default_factory=dict,
         description="Backend-specific or pipeline execution metadata.",
     )
+
+
+class InferenceBatch(BaseModel):
+    """Domain model representing an immutable grouped batch of inference requests."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    batch_id: str = Field(
+        default_factory=lambda: uuid.uuid4().hex,
+        description="Unique identifier for tracking the formed batch.",
+    )
+    requests: tuple[InferenceRequest, ...] = Field(
+        ...,
+        description="Ordered sequence of inference requests forming this batch.",
+    )
+    created_at: float = Field(
+        default_factory=time.perf_counter,
+        description="Monotonic creation timestamp measured via time.perf_counter().",
+    )
+
+    @field_validator("requests")
+    @classmethod
+    def validate_requests_not_empty(
+        cls, v: tuple[InferenceRequest, ...]
+    ) -> tuple[InferenceRequest, ...]:
+        """Ensure batch contains at least one inference request."""
+        if not v:
+            raise ValueError("InferenceBatch cannot be empty; must contain at least one request.")
+        return v
+
+    @property
+    def size(self) -> int:
+        """Number of individual inference requests in the batch."""
+        return len(self.requests)
+
+    @property
+    def request_ids(self) -> list[str]:
+        """Ordered list of request identifiers in the batch."""
+        return [r.request_id for r in self.requests]
+
+    @property
+    def total_max_tokens(self) -> int:
+        """Sum of max_tokens limits across all requests in the batch."""
+        return sum(r.max_tokens for r in self.requests)

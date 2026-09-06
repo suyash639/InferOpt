@@ -5,8 +5,8 @@ import hashlib
 import time
 from typing import Final
 
-from inferopt.backends.base import InferenceBackend
-from inferopt.core.models import InferenceRequest, InferenceResponse
+from inferopt.backends.base import BatchInferenceBackend, InferenceBackend
+from inferopt.core.models import InferenceBatch, InferenceRequest, InferenceResponse
 
 BACKEND_NAME: Final[str] = "mock"
 
@@ -26,7 +26,7 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(words))
 
 
-class MockBackend(InferenceBackend):
+class MockBackend(InferenceBackend, BatchInferenceBackend):
     """Deterministic, GPU-independent mock inference engine.
 
     Produces predictable, reproducible outputs and token metrics for identical
@@ -105,3 +105,14 @@ class MockBackend(InferenceBackend):
                 "simulated_delay_sec": latency_sec,
             },
         )
+
+    async def generate_batch(self, batch: InferenceBatch) -> list[InferenceResponse]:
+        """Execute mock inference across a batch of requests concurrently.
+
+        Args:
+            batch: The batch of inference requests to process.
+
+        Returns:
+            List of InferenceResponse instances matching the batch request order.
+        """
+        return list(await asyncio.gather(*[self.generate(req) for req in batch.requests]))

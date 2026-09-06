@@ -27,6 +27,9 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
 ]
 
+[project.scripts]
+inferopt-bench = "inferopt.benchmarks.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "mypy>=1.10.0",

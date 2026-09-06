@@ -1,21 +1,25 @@
-"""Asynchronous request scheduler with priority, concurrency bounding, and backpressure."""
+"""Asynchronous request scheduler with priority, concurrency, batching, and telemetry."""
 
 import asyncio
+import contextlib
 import itertools
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Final
 
-from inferopt.backends.base import InferenceBackend
+from inferopt.backends.base import BatchInferenceBackend, InferenceBackend
 from inferopt.core.exceptions import (
+    InferenceError,
     QueueFullError,
     SchedulerNotRunningError,
     SchedulerShutdownError,
 )
-from inferopt.core.models import InferenceRequest, InferenceResponse
-from inferopt.scheduler.config import SchedulerConfig
+from inferopt.core.models import InferenceBatch, InferenceRequest, InferenceResponse
+from inferopt.scheduler.config import BatchConfig, SchedulerConfig
 from inferopt.scheduler.lifecycle import RequestRecord, RequestStatus
+from inferopt.telemetry.collector import MetricsCollector
+from inferopt.telemetry.models import BatchMetrics, RequestMetrics
 
 _SENTINEL: Final[object] = object()
 
@@ -33,22 +37,26 @@ class Scheduler:
     """Asynchronous request scheduler for LLM inference serving.
 
     Enforces bounded concurrency, priority-based dispatch with FIFO tie-breaking,
-    queue capacity backpressure, request lifecycle tracking, and execution timing metrics.
+    dynamic batch formation with wait windows, queue capacity backpressure,
+    request lifecycle tracking, execution timing metrics, and non-intrusive telemetry.
     """
 
     def __init__(
         self,
         backend: InferenceBackend,
         config: SchedulerConfig | None = None,
+        collector: MetricsCollector | None = None,
     ) -> None:
-        """Initialize the scheduler with a backend implementation and configuration.
+        """Initialize the scheduler with a backend implementation, configuration, and telemetry.
 
         Args:
             backend: The inference engine executing requests (e.g., MockBackend, MLXBackend).
             config: Scheduler configuration settings. Defaults to SchedulerConfig().
+            collector: Optional metrics collector. Defaults to a new MetricsCollector().
         """
         self._backend = backend
         self._config = config or SchedulerConfig()
+        self._collector = collector if collector is not None else MetricsCollector()
 
         self._queue: asyncio.PriorityQueue[tuple[int, int, Any]] = asyncio.PriorityQueue()
         self._sequence_counter = itertools.count()
@@ -65,6 +73,16 @@ class Scheduler:
     def config(self) -> SchedulerConfig:
         """Current scheduler configuration."""
         return self._config
+
+    @property
+    def batch_config(self) -> BatchConfig:
+        """Current batching configuration."""
+        return self._config.batch_config
+
+    @property
+    def collector(self) -> MetricsCollector:
+        """Active telemetry and metrics collector."""
+        return self._collector
 
     @property
     def is_running(self) -> bool:
@@ -85,6 +103,11 @@ class Scheduler:
     def queued_count(self) -> int:
         """Number of pending requests waiting in the priority queue."""
         return self._queue.qsize()
+
+    def _safe_record(self, fn: Any, *args: Any, **kwargs: Any) -> None:
+        """Safely execute a telemetry collection callback, strictly isolating any exceptions."""
+        with contextlib.suppress(Exception):
+            fn(*args, **kwargs)
 
     async def start(self) -> None:
         """Start the scheduler worker pool.
@@ -121,27 +144,45 @@ class Scheduler:
             return
 
         self._is_shutting_down = True
+        backend_name = getattr(self._backend, "backend_name", "unknown")
 
         # 1. Drain and cancel pending queued requests if requested
         if cancel_queued:
+            cancelled_time = time.perf_counter()
             while not self._queue.empty():
                 try:
                     _, _, raw_item = self._queue.get_nowait()
                     if raw_item is not _SENTINEL and isinstance(raw_item, _QueueItem):
+                        if not raw_item.record.status.is_terminal:
+                            raw_item.record.mark_cancelled(
+                                cancelled_time,
+                                error_message="Scheduler shutdown cancelled pending request.",
+                            )
+                        self._prune_history()
+                        self._safe_record(
+                            self._collector.record_request,
+                            RequestMetrics(
+                                request_id=raw_item.request.request_id,
+                                priority=raw_item.request.priority,
+                                queue_wait_ms=raw_item.record.queue_wait_ms or 0.0,
+                                execution_ms=0.0,
+                                total_latency_ms=raw_item.record.total_latency_ms or 0.0,
+                                status=RequestStatus.CANCELLED,
+                                max_tokens=raw_item.request.max_tokens,
+                                backend_name=backend_name,
+                                error_message="Scheduler shutdown cancelled pending request.",
+                            ),
+                        )
                         if not raw_item.future.done():
                             raw_item.future.set_exception(
                                 SchedulerShutdownError(
                                     "Request cancelled due to scheduler shutdown."
                                 )
                             )
-                        if not raw_item.record.status.is_terminal:
-                            raw_item.record.mark_cancelled(
-                                time.perf_counter(),
-                                error_message="Scheduler shutdown cancelled pending request.",
-                            )
                     self._queue.task_done()
                 except asyncio.QueueEmpty:
                     break
+            self._safe_record(self._collector.record_queue_depth, 0)
 
         # 2. Wait for active requests to complete if requested
         if wait_running and self._active_requests:
@@ -228,6 +269,7 @@ class Scheduler:
         # Invert priority so min-heap dequeues highest numeric priority first.
         # seq_id ensures deterministic FIFO ordering among identical priorities.
         self._queue.put_nowait((-request.priority, seq_id, item))
+        self._safe_record(self._collector.record_queue_depth, self._queue.qsize())
 
         try:
             return await future
@@ -239,6 +281,22 @@ class Scheduler:
                     time.perf_counter(),
                     error_message="Request submission cancelled by caller.",
                 )
+                self._prune_history()
+                self._safe_record(
+                    self._collector.record_request,
+                    RequestMetrics(
+                        request_id=request.request_id,
+                        priority=request.priority,
+                        queue_wait_ms=record.queue_wait_ms or 0.0,
+                        execution_ms=0.0,
+                        total_latency_ms=record.total_latency_ms or 0.0,
+                        status=RequestStatus.CANCELLED,
+                        max_tokens=request.max_tokens,
+                        backend_name=getattr(self._backend, "backend_name", "unknown"),
+                        error_message="Request submission cancelled by caller.",
+                    ),
+                )
+                self._safe_record(self._collector.record_queue_depth, self._queue.qsize())
             raise
 
     def get_status(self, request_id: str) -> RequestStatus | None:
@@ -251,7 +309,12 @@ class Scheduler:
         return self._records.get(request_id)
 
     async def _worker_loop(self, worker_id: int) -> None:
-        """Internal worker task processing queued requests concurrently."""
+        """Internal worker task processing batches of queued requests concurrently."""
+        batch_cfg = self._config.batch_config
+        max_batch_size = batch_cfg.max_batch_size
+        batch_wait_sec = batch_cfg.batch_wait_ms / 1000.0
+        backend_name = getattr(self._backend, "backend_name", "unknown")
+
         while self._is_running:
             try:
                 _, _, raw_item = await self._queue.get()
@@ -262,49 +325,412 @@ class Scheduler:
                 self._queue.task_done()
                 break
 
-            item: _QueueItem = raw_item
-
-            # Check if caller cancelled before dispatch
-            if item.future.cancelled():
-                if not item.record.status.is_terminal:
-                    item.record.mark_cancelled(
+            # Handle cancelled first item
+            if raw_item.future.cancelled():
+                if not raw_item.record.status.is_terminal:
+                    raw_item.record.mark_cancelled(
                         time.perf_counter(),
                         error_message="Request cancelled prior to dispatch.",
+                    )
+                    self._safe_record(
+                        self._collector.record_request,
+                        RequestMetrics(
+                            request_id=raw_item.request.request_id,
+                            priority=raw_item.request.priority,
+                            queue_wait_ms=raw_item.record.queue_wait_ms or 0.0,
+                            execution_ms=0.0,
+                            total_latency_ms=raw_item.record.total_latency_ms or 0.0,
+                            status=RequestStatus.CANCELLED,
+                            max_tokens=raw_item.request.max_tokens,
+                            backend_name=backend_name,
+                            error_message="Request cancelled prior to dispatch.",
+                        ),
                     )
                 self._queue.task_done()
                 self._prune_history()
                 continue
 
-            self._active_requests.add(item.request.request_id)
+            batch_formation_start = time.perf_counter()
+            items: list[_QueueItem] = [raw_item]
+
+            # 1. Drain any items already waiting in the queue up to max_batch_size
+            while len(items) < max_batch_size and not self._queue.empty():
+                try:
+                    _, _, extra_raw = self._queue.get_nowait()
+                    if extra_raw is _SENTINEL or not isinstance(extra_raw, _QueueItem):
+                        self._queue.task_done()
+                        break
+                    if extra_raw.future.cancelled():
+                        if not extra_raw.record.status.is_terminal:
+                            extra_raw.record.mark_cancelled(
+                                time.perf_counter(),
+                                error_message="Request cancelled prior to dispatch.",
+                            )
+                            self._safe_record(
+                                self._collector.record_request,
+                                RequestMetrics(
+                                    request_id=extra_raw.request.request_id,
+                                    priority=extra_raw.request.priority,
+                                    queue_wait_ms=extra_raw.record.queue_wait_ms or 0.0,
+                                    execution_ms=0.0,
+                                    total_latency_ms=extra_raw.record.total_latency_ms or 0.0,
+                                    status=RequestStatus.CANCELLED,
+                                    max_tokens=extra_raw.request.max_tokens,
+                                    backend_name=backend_name,
+                                    error_message="Request cancelled prior to dispatch.",
+                                ),
+                            )
+                        self._queue.task_done()
+                        self._prune_history()
+                        continue
+                    items.append(extra_raw)
+                except asyncio.QueueEmpty:
+                    break
+
+            # 2. If batch is not full and batch_wait_sec > 0, wait up to the window limit
+            if len(items) < max_batch_size and batch_wait_sec > 0:
+                deadline = batch_formation_start + batch_wait_sec
+                while len(items) < max_batch_size:
+                    remaining = deadline - time.perf_counter()
+                    if remaining <= 0:
+                        break
+                    try:
+                        _, _, next_raw = await asyncio.wait_for(
+                            self._queue.get(), timeout=remaining
+                        )
+                        if next_raw is _SENTINEL or not isinstance(next_raw, _QueueItem):
+                            self._queue.task_done()
+                            break
+                        if next_raw.future.cancelled():
+                            if not next_raw.record.status.is_terminal:
+                                next_raw.record.mark_cancelled(
+                                    time.perf_counter(),
+                                    error_message="Request cancelled prior to dispatch.",
+                                )
+                                self._safe_record(
+                                    self._collector.record_request,
+                                    RequestMetrics(
+                                        request_id=next_raw.request.request_id,
+                                        priority=next_raw.request.priority,
+                                        queue_wait_ms=next_raw.record.queue_wait_ms or 0.0,
+                                        execution_ms=0.0,
+                                        total_latency_ms=next_raw.record.total_latency_ms or 0.0,
+                                        status=RequestStatus.CANCELLED,
+                                        max_tokens=next_raw.request.max_tokens,
+                                        backend_name=backend_name,
+                                        error_message="Request cancelled prior to dispatch.",
+                                    ),
+                                )
+                            self._queue.task_done()
+                            self._prune_history()
+                            continue
+                        items.append(next_raw)
+                    except TimeoutError:
+                        break
+                    except asyncio.CancelledError:
+                        cancelled_time = time.perf_counter()
+                        for it in items:
+                            if not it.record.status.is_terminal:
+                                it.record.mark_cancelled(
+                                    cancelled_time,
+                                    error_message="Scheduler shutdown cancelled batch formation.",
+                                )
+                            self._prune_history()
+                            self._safe_record(
+                                self._collector.record_request,
+                                RequestMetrics(
+                                    request_id=it.request.request_id,
+                                    priority=it.request.priority,
+                                    queue_wait_ms=it.record.queue_wait_ms or 0.0,
+                                    execution_ms=0.0,
+                                    total_latency_ms=it.record.total_latency_ms or 0.0,
+                                    status=RequestStatus.CANCELLED,
+                                    max_tokens=it.request.max_tokens,
+                                    backend_name=backend_name,
+                                    error_message="Scheduler shutdown cancelled batch formation.",
+                                ),
+                            )
+                            if not it.future.done():
+                                it.future.set_exception(
+                                    SchedulerShutdownError(
+                                        "Request cancelled due to scheduler shutdown."
+                                    )
+                                )
+                            self._queue.task_done()
+                        raise
+
+            if not items:
+                continue
+
+            # Mark all items as RUNNING
+            dispatch_time = time.perf_counter()
+            formation_wait_ms = max(0.0, (dispatch_time - batch_formation_start) * 1000.0)
+
+            for it in items:
+                self._active_requests.add(it.request.request_id)
+                it.record.mark_running(dispatch_time)
             self._active_changed_event.set()
-            item.record.mark_running(time.perf_counter())
+            self._safe_record(self._collector.record_queue_depth, self._queue.qsize())
+            self._safe_record(self._collector.record_active_concurrency, len(self._active_requests))
+
+            batch = InferenceBatch(requests=tuple(it.request for it in items))
 
             try:
-                response = await self._backend.generate(item.request)
-                item.record.mark_completed(time.perf_counter())
-                if not item.future.done():
-                    item.future.set_result(response)
-            except asyncio.CancelledError:
-                if not item.record.status.is_terminal:
-                    item.record.mark_cancelled(
-                        time.perf_counter(),
-                        error_message="Execution cancelled.",
+                if isinstance(self._backend, BatchInferenceBackend):
+                    # Backend natively supports batched execution
+                    responses = await self._backend.generate_batch(batch)
+                    completed_time = time.perf_counter()
+                    exec_duration_ms = max(0.0, (completed_time - dispatch_time) * 1000.0)
+                    resp_map = {r.request_id: r for r in responses}
+
+                    completed_count = 0
+                    failed_count = 0
+
+                    for it in items:
+                        resp = resp_map.get(it.request.request_id)
+                        if resp is not None:
+                            it.record.mark_completed(completed_time)
+                            completed_count += 1
+                            self._prune_history()
+                            self._safe_record(
+                                self._collector.record_request,
+                                RequestMetrics(
+                                    request_id=it.request.request_id,
+                                    priority=it.request.priority,
+                                    queue_wait_ms=it.record.queue_wait_ms or 0.0,
+                                    execution_ms=it.record.execution_ms or exec_duration_ms,
+                                    total_latency_ms=it.record.total_latency_ms or 0.0,
+                                    status=RequestStatus.COMPLETED,
+                                    input_tokens=resp.input_tokens,
+                                    output_tokens=resp.output_tokens,
+                                    max_tokens=it.request.max_tokens,
+                                    backend_name=resp.backend_name,
+                                    batch_id=batch.batch_id,
+                                ),
+                            )
+                            if not it.future.done():
+                                it.future.set_result(resp)
+                        else:
+                            err_msg = (
+                                f"Backend omitted response for request {it.request.request_id}"
+                            )
+                            it.record.mark_failed(completed_time, err_msg)
+                            failed_count += 1
+                            self._prune_history()
+                            self._safe_record(
+                                self._collector.record_request,
+                                RequestMetrics(
+                                    request_id=it.request.request_id,
+                                    priority=it.request.priority,
+                                    queue_wait_ms=it.record.queue_wait_ms or 0.0,
+                                    execution_ms=it.record.execution_ms or exec_duration_ms,
+                                    total_latency_ms=it.record.total_latency_ms or 0.0,
+                                    status=RequestStatus.FAILED,
+                                    max_tokens=it.request.max_tokens,
+                                    backend_name=backend_name,
+                                    batch_id=batch.batch_id,
+                                    error_message=err_msg,
+                                ),
+                            )
+                            if not it.future.done():
+                                it.future.set_exception(InferenceError(err_msg))
+
+                    self._safe_record(
+                        self._collector.record_batch,
+                        BatchMetrics(
+                            batch_id=batch.batch_id,
+                            size=batch.size,
+                            batch_formation_wait_ms=formation_wait_ms,
+                            execution_ms=exec_duration_ms,
+                            total_max_tokens=batch.total_max_tokens,
+                            backend_name=backend_name,
+                            request_ids=tuple(batch.request_ids),
+                            completed_request_count=completed_count,
+                            failed_request_count=failed_count,
+                        ),
                     )
-                if not item.future.done():
-                    item.future.cancel()
+                else:
+                    # Backend executes requests individually
+                    completed_count = 0
+                    failed_count = 0
+
+                    async def _execute_single(
+                        item_to_exec: _QueueItem,
+                        assigned_batch_id: str,
+                        engine_name: str,
+                    ) -> None:
+                        nonlocal completed_count, failed_count
+                        try:
+                            resp = await self._backend.generate(item_to_exec.request)
+                            done_time = time.perf_counter()
+                            item_to_exec.record.mark_completed(done_time)
+                            completed_count += 1
+                            self._prune_history()
+                            self._safe_record(
+                                self._collector.record_request,
+                                RequestMetrics(
+                                    request_id=item_to_exec.request.request_id,
+                                    priority=item_to_exec.request.priority,
+                                    queue_wait_ms=item_to_exec.record.queue_wait_ms or 0.0,
+                                    execution_ms=item_to_exec.record.execution_ms or 0.0,
+                                    total_latency_ms=item_to_exec.record.total_latency_ms or 0.0,
+                                    status=RequestStatus.COMPLETED,
+                                    input_tokens=resp.input_tokens,
+                                    output_tokens=resp.output_tokens,
+                                    max_tokens=item_to_exec.request.max_tokens,
+                                    backend_name=resp.backend_name,
+                                    batch_id=assigned_batch_id,
+                                ),
+                            )
+                            if not item_to_exec.future.done():
+                                item_to_exec.future.set_result(resp)
+                        except asyncio.CancelledError:
+                            if not item_to_exec.record.status.is_terminal:
+                                item_to_exec.record.mark_cancelled(
+                                    time.perf_counter(),
+                                    error_message="Execution cancelled.",
+                                )
+                            self._prune_history()
+                            self._safe_record(
+                                self._collector.record_request,
+                                RequestMetrics(
+                                    request_id=item_to_exec.request.request_id,
+                                    priority=item_to_exec.request.priority,
+                                    queue_wait_ms=item_to_exec.record.queue_wait_ms or 0.0,
+                                    execution_ms=0.0,
+                                    total_latency_ms=item_to_exec.record.total_latency_ms or 0.0,
+                                    status=RequestStatus.CANCELLED,
+                                    max_tokens=item_to_exec.request.max_tokens,
+                                    backend_name=engine_name,
+                                    batch_id=assigned_batch_id,
+                                    error_message="Execution cancelled.",
+                                ),
+                            )
+                            if not item_to_exec.future.done():
+                                item_to_exec.future.cancel()
+                            raise
+                        except Exception as exc:
+                            if not item_to_exec.record.status.is_terminal:
+                                item_to_exec.record.mark_failed(
+                                    time.perf_counter(),
+                                    error_message=str(exc),
+                                )
+                            failed_count += 1
+                            self._prune_history()
+                            self._safe_record(
+                                self._collector.record_request,
+                                RequestMetrics(
+                                    request_id=item_to_exec.request.request_id,
+                                    priority=item_to_exec.request.priority,
+                                    queue_wait_ms=item_to_exec.record.queue_wait_ms or 0.0,
+                                    execution_ms=0.0,
+                                    total_latency_ms=item_to_exec.record.total_latency_ms or 0.0,
+                                    status=RequestStatus.FAILED,
+                                    max_tokens=item_to_exec.request.max_tokens,
+                                    backend_name=engine_name,
+                                    batch_id=assigned_batch_id,
+                                    error_message=str(exc),
+                                ),
+                            )
+                            if not item_to_exec.future.done():
+                                item_to_exec.future.set_exception(exc)
+
+                    exec_start = time.perf_counter()
+                    await asyncio.gather(
+                        *[_execute_single(it, batch.batch_id, backend_name) for it in items],
+                        return_exceptions=True,
+                    )
+                    exec_end = time.perf_counter()
+                    exec_duration_ms = max(0.0, (exec_end - exec_start) * 1000.0)
+
+                    self._safe_record(
+                        self._collector.record_batch,
+                        BatchMetrics(
+                            batch_id=batch.batch_id,
+                            size=batch.size,
+                            batch_formation_wait_ms=formation_wait_ms,
+                            execution_ms=exec_duration_ms,
+                            total_max_tokens=batch.total_max_tokens,
+                            backend_name=backend_name,
+                            request_ids=tuple(batch.request_ids),
+                            completed_request_count=completed_count,
+                            failed_request_count=failed_count,
+                        ),
+                    )
+
+            except asyncio.CancelledError:
+                cancelled_time = time.perf_counter()
+                for it in items:
+                    if not it.record.status.is_terminal:
+                        it.record.mark_cancelled(
+                            cancelled_time, error_message="Execution cancelled."
+                        )
+                    self._prune_history()
+                    self._safe_record(
+                        self._collector.record_request,
+                        RequestMetrics(
+                            request_id=it.request.request_id,
+                            priority=it.request.priority,
+                            queue_wait_ms=it.record.queue_wait_ms or 0.0,
+                            execution_ms=0.0,
+                            total_latency_ms=it.record.total_latency_ms or 0.0,
+                            status=RequestStatus.CANCELLED,
+                            max_tokens=it.request.max_tokens,
+                            backend_name=backend_name,
+                            batch_id=batch.batch_id,
+                            error_message="Execution cancelled.",
+                        ),
+                    )
+                    if not it.future.done():
+                        it.future.cancel()
                 raise
             except Exception as exc:
-                if not item.record.status.is_terminal:
-                    item.record.mark_failed(
-                        time.perf_counter(),
-                        error_message=str(exc),
+                failed_time = time.perf_counter()
+                exec_duration_ms = max(0.0, (failed_time - dispatch_time) * 1000.0)
+                for it in items:
+                    if not it.record.status.is_terminal:
+                        it.record.mark_failed(failed_time, error_message=str(exc))
+                    self._prune_history()
+                    self._safe_record(
+                        self._collector.record_request,
+                        RequestMetrics(
+                            request_id=it.request.request_id,
+                            priority=it.request.priority,
+                            queue_wait_ms=it.record.queue_wait_ms or 0.0,
+                            execution_ms=it.record.execution_ms or exec_duration_ms,
+                            total_latency_ms=it.record.total_latency_ms or 0.0,
+                            status=RequestStatus.FAILED,
+                            max_tokens=it.request.max_tokens,
+                            backend_name=backend_name,
+                            batch_id=batch.batch_id,
+                            error_message=str(exc),
+                        ),
                     )
-                if not item.future.done():
-                    item.future.set_exception(exc)
+                    if not it.future.done():
+                        it.future.set_exception(exc)
+
+                self._safe_record(
+                    self._collector.record_batch,
+                    BatchMetrics(
+                        batch_id=batch.batch_id,
+                        size=batch.size,
+                        batch_formation_wait_ms=formation_wait_ms,
+                        execution_ms=exec_duration_ms,
+                        total_max_tokens=batch.total_max_tokens,
+                        backend_name=backend_name,
+                        request_ids=tuple(batch.request_ids),
+                        completed_request_count=0,
+                        failed_request_count=len(items),
+                    ),
+                )
             finally:
-                self._active_requests.discard(item.request.request_id)
+                for it in items:
+                    self._active_requests.discard(it.request.request_id)
+                    self._queue.task_done()
                 self._active_changed_event.set()
-                self._queue.task_done()
+                self._safe_record(
+                    self._collector.record_active_concurrency, len(self._active_requests)
+                )
                 self._prune_history()
 
     def _add_record(self, record: RequestRecord) -> None:

@@ -1,0 +1,869 @@
+{
+  "scenario_name": "mixed",
+  "description": "Mixed workload: 60 requests with mixed priorities (-1, 0, 1, 2) and multiple categories",
+  "config": {
+    "scenario_name": "mixed",
+    "description": "Mixed workload: 60 requests with mixed priorities (-1, 0, 1, 2) and multiple categories",
+    "num_requests": 60,
+    "arrival_pattern": "CONCURRENT",
+    "arrival_rate_rps": null,
+    "seed": 42,
+    "prompt_categories": [
+      "SHORT",
+      "MEDIUM",
+      "REASONING",
+      "SUMMARIZATION"
+    ],
+    "max_tokens": 64,
+    "priority_levels": [
+      -1,
+      0,
+      1,
+      2
+    ],
+    "concurrency": null
+  },
+  "requests": [
+    {
+      "request_id": "req-mixed-0000",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 0,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0001",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 1,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0002",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 2,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0003",
+      "model": "benchmark-model",
+      "prompt": "Text: Speculative decoding accelerates autoregressive generation by using a lightweight draft model to generate a sequence of candidate tokens in parallel, which are subsequently verified by the primary target model in a single forward pass. If the draft tokens match the target model distribution, multiple tokens are accepted in one step, significantly improving generation throughput without altering output quality. The acceptance rate depends heavily on the alignment between the draft and target models, the temperature of generation, and domain complexity. Task: Provide a concise two-sentence summary outlining the core mechanism and key performance factor of speculative decoding.",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SUMMARIZATION",
+        "index": 3,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0004",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 4,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0005",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 5,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0006",
+      "model": "benchmark-model",
+      "prompt": "Text: Speculative decoding accelerates autoregressive generation by using a lightweight draft model to generate a sequence of candidate tokens in parallel, which are subsequently verified by the primary target model in a single forward pass. If the draft tokens match the target model distribution, multiple tokens are accepted in one step, significantly improving generation throughput without altering output quality. The acceptance rate depends heavily on the alignment between the draft and target models, the temperature of generation, and domain complexity. Task: Provide a concise two-sentence summary outlining the core mechanism and key performance factor of speculative decoding.",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SUMMARIZATION",
+        "index": 6,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0007",
+      "model": "benchmark-model",
+      "prompt": "Solve this scheduling problem step-by-step: An inference server processes batches of up to 4 requests. Each batch takes exactly 40ms to execute. If requests arrive at a Poisson rate of 80 requests/sec, what is the minimum number of parallel worker slots required to maintain a stable queue where arrival rate does not exceed maximum service rate? Show your mathematical derivation.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 7,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0008",
+      "model": "benchmark-model",
+      "prompt": "Text: FlashAttention and FlashAttention-2 reformulate exact attention computation to optimize GPU SRAM and HBM memory transfers. By tiling the query, key, and value matrices and performing softmax reduction incrementally in fast on-chip shared memory, FlashAttention avoids materializing the quadratic intermediate attention matrix in high-bandwidth memory (HBM). This results in dramatic memory savings and substantial wall-clock speedups for long-sequence workloads. Task: Summarize how tiling and incremental softmax enable linear memory complexity in FlashAttention.",
+      "priority": 1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SUMMARIZATION",
+        "index": 8,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0009",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 9,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0010",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 10,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0011",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": 1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 11,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0012",
+      "model": "benchmark-model",
+      "prompt": "Solve this scheduling problem step-by-step: An inference server processes batches of up to 4 requests. Each batch takes exactly 40ms to execute. If requests arrive at a Poisson rate of 80 requests/sec, what is the minimum number of parallel worker slots required to maintain a stable queue where arrival rate does not exceed maximum service rate? Show your mathematical derivation.",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 12,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0013",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 13,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0014",
+      "model": "benchmark-model",
+      "prompt": "Compare two scheduling policies for LLM serving: Shortest-Job-First (approximated by prompt length + max_tokens) versus strict First-In-First-Out (FIFO). Prove why SJF minimizes average turnaround time while discussing starvation mitigation mechanisms such as aging.",
+      "priority": 1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 14,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0015",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 15,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0016",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 16,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0017",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 17,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0018",
+      "model": "benchmark-model",
+      "prompt": "Analyze the algorithmic complexity and concurrency implications of maintaining an in-memory priority min-heap with monotonic sequence IDs for FIFO tie-breaking under high async insertion rates. Discuss lock contention vs lock-free priority queue designs.",
+      "priority": 1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 18,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0019",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 19,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0020",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 20,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0021",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 21,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0022",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 22,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0023",
+      "model": "benchmark-model",
+      "prompt": "Compare two scheduling policies for LLM serving: Shortest-Job-First (approximated by prompt length + max_tokens) versus strict First-In-First-Out (FIFO). Prove why SJF minimizes average turnaround time while discussing starvation mitigation mechanisms such as aging.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 23,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0024",
+      "model": "benchmark-model",
+      "prompt": "Solve this scheduling problem step-by-step: An inference server processes batches of up to 4 requests. Each batch takes exactly 40ms to execute. If requests arrive at a Poisson rate of 80 requests/sec, what is the minimum number of parallel worker slots required to maintain a stable queue where arrival rate does not exceed maximum service rate? Show your mathematical derivation.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 24,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0025",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 25,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0026",
+      "model": "benchmark-model",
+      "prompt": "Solve this scheduling problem step-by-step: An inference server processes batches of up to 4 requests. Each batch takes exactly 40ms to execute. If requests arrive at a Poisson rate of 80 requests/sec, what is the minimum number of parallel worker slots required to maintain a stable queue where arrival rate does not exceed maximum service rate? Show your mathematical derivation.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 26,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0027",
+      "model": "benchmark-model",
+      "prompt": "Solve this scheduling problem step-by-step: An inference server processes batches of up to 4 requests. Each batch takes exactly 40ms to execute. If requests arrive at a Poisson rate of 80 requests/sec, what is the minimum number of parallel worker slots required to maintain a stable queue where arrival rate does not exceed maximum service rate? Show your mathematical derivation.",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 27,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0028",
+      "model": "benchmark-model",
+      "prompt": "Text: FlashAttention and FlashAttention-2 reformulate exact attention computation to optimize GPU SRAM and HBM memory transfers. By tiling the query, key, and value matrices and performing softmax reduction incrementally in fast on-chip shared memory, FlashAttention avoids materializing the quadratic intermediate attention matrix in high-bandwidth memory (HBM). This results in dramatic memory savings and substantial wall-clock speedups for long-sequence workloads. Task: Summarize how tiling and incremental softmax enable linear memory complexity in FlashAttention.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SUMMARIZATION",
+        "index": 28,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0029",
+      "model": "benchmark-model",
+      "prompt": "Solve this scheduling problem step-by-step: An inference server processes batches of up to 4 requests. Each batch takes exactly 40ms to execute. If requests arrive at a Poisson rate of 80 requests/sec, what is the minimum number of parallel worker slots required to maintain a stable queue where arrival rate does not exceed maximum service rate? Show your mathematical derivation.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 29,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0030",
+      "model": "benchmark-model",
+      "prompt": "Compare two scheduling policies for LLM serving: Shortest-Job-First (approximated by prompt length + max_tokens) versus strict First-In-First-Out (FIFO). Prove why SJF minimizes average turnaround time while discussing starvation mitigation mechanisms such as aging.",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 30,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0031",
+      "model": "benchmark-model",
+      "prompt": "Text: FlashAttention and FlashAttention-2 reformulate exact attention computation to optimize GPU SRAM and HBM memory transfers. By tiling the query, key, and value matrices and performing softmax reduction incrementally in fast on-chip shared memory, FlashAttention avoids materializing the quadratic intermediate attention matrix in high-bandwidth memory (HBM). This results in dramatic memory savings and substantial wall-clock speedups for long-sequence workloads. Task: Summarize how tiling and incremental softmax enable linear memory complexity in FlashAttention.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SUMMARIZATION",
+        "index": 31,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0032",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 32,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0033",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 33,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0034",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 34,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0035",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 35,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0036",
+      "model": "benchmark-model",
+      "prompt": "Text: FlashAttention and FlashAttention-2 reformulate exact attention computation to optimize GPU SRAM and HBM memory transfers. By tiling the query, key, and value matrices and performing softmax reduction incrementally in fast on-chip shared memory, FlashAttention avoids materializing the quadratic intermediate attention matrix in high-bandwidth memory (HBM). This results in dramatic memory savings and substantial wall-clock speedups for long-sequence workloads. Task: Summarize how tiling and incremental softmax enable linear memory complexity in FlashAttention.",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SUMMARIZATION",
+        "index": 36,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0037",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 37,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0038",
+      "model": "benchmark-model",
+      "prompt": "Solve this scheduling problem step-by-step: An inference server processes batches of up to 4 requests. Each batch takes exactly 40ms to execute. If requests arrive at a Poisson rate of 80 requests/sec, what is the minimum number of parallel worker slots required to maintain a stable queue where arrival rate does not exceed maximum service rate? Show your mathematical derivation.",
+      "priority": 1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 38,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0039",
+      "model": "benchmark-model",
+      "prompt": "Text: Speculative decoding accelerates autoregressive generation by using a lightweight draft model to generate a sequence of candidate tokens in parallel, which are subsequently verified by the primary target model in a single forward pass. If the draft tokens match the target model distribution, multiple tokens are accepted in one step, significantly improving generation throughput without altering output quality. The acceptance rate depends heavily on the alignment between the draft and target models, the temperature of generation, and domain complexity. Task: Provide a concise two-sentence summary outlining the core mechanism and key performance factor of speculative decoding.",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SUMMARIZATION",
+        "index": 39,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0040",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 40,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0041",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 41,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0042",
+      "model": "benchmark-model",
+      "prompt": "Compare two scheduling policies for LLM serving: Shortest-Job-First (approximated by prompt length + max_tokens) versus strict First-In-First-Out (FIFO). Prove why SJF minimizes average turnaround time while discussing starvation mitigation mechanisms such as aging.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 42,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0043",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 43,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0044",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 44,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0045",
+      "model": "benchmark-model",
+      "prompt": "Text: Speculative decoding accelerates autoregressive generation by using a lightweight draft model to generate a sequence of candidate tokens in parallel, which are subsequently verified by the primary target model in a single forward pass. If the draft tokens match the target model distribution, multiple tokens are accepted in one step, significantly improving generation throughput without altering output quality. The acceptance rate depends heavily on the alignment between the draft and target models, the temperature of generation, and domain complexity. Task: Provide a concise two-sentence summary outlining the core mechanism and key performance factor of speculative decoding.",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SUMMARIZATION",
+        "index": 45,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0046",
+      "model": "benchmark-model",
+      "prompt": "Analyze the algorithmic complexity and concurrency implications of maintaining an in-memory priority min-heap with monotonic sequence IDs for FIFO tie-breaking under high async insertion rates. Discuss lock contention vs lock-free priority queue designs.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 46,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0047",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 47,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0048",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 48,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0049",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 49,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0050",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 50,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0051",
+      "model": "benchmark-model",
+      "prompt": "Compare two scheduling policies for LLM serving: Shortest-Job-First (approximated by prompt length + max_tokens) versus strict First-In-First-Out (FIFO). Prove why SJF minimizes average turnaround time while discussing starvation mitigation mechanisms such as aging.",
+      "priority": 2,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 51,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0052",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 52,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0053",
+      "model": "benchmark-model",
+      "prompt": "Analyze the algorithmic complexity and concurrency implications of maintaining an in-memory priority min-heap with monotonic sequence IDs for FIFO tie-breaking under high async insertion rates. Discuss lock contention vs lock-free priority queue designs.",
+      "priority": 1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 53,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0054",
+      "model": "benchmark-model",
+      "prompt": "Text: FlashAttention and FlashAttention-2 reformulate exact attention computation to optimize GPU SRAM and HBM memory transfers. By tiling the query, key, and value matrices and performing softmax reduction incrementally in fast on-chip shared memory, FlashAttention avoids materializing the quadratic intermediate attention matrix in high-bandwidth memory (HBM). This results in dramatic memory savings and substantial wall-clock speedups for long-sequence workloads. Task: Summarize how tiling and incremental softmax enable linear memory complexity in FlashAttention.",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SUMMARIZATION",
+        "index": 54,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0055",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 55,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0056",
+      "model": "benchmark-model",
+      "prompt": "Solve this scheduling problem step-by-step: An inference server processes batches of up to 4 requests. Each batch takes exactly 40ms to execute. If requests arrive at a Poisson rate of 80 requests/sec, what is the minimum number of parallel worker slots required to maintain a stable queue where arrival rate does not exceed maximum service rate? Show your mathematical derivation.",
+      "priority": 0,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "REASONING",
+        "index": 56,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0057",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 57,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0058",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 58,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-mixed-0059",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": -1,
+      "max_tokens": 64,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 59,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    }
+  ],
+  "created_at": 1788730066.58606
+}

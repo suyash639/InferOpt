@@ -1,0 +1,2826 @@
+{
+  "scenario_name": "heavy",
+  "description": "Heavy workload: 200 requests with mixed short/medium/long prompts",
+  "config": {
+    "scenario_name": "heavy",
+    "description": "Heavy workload: 200 requests with mixed short/medium/long prompts",
+    "num_requests": 200,
+    "arrival_pattern": "CONCURRENT",
+    "arrival_rate_rps": null,
+    "seed": 42,
+    "prompt_categories": [
+      "SHORT",
+      "MEDIUM",
+      "LONG",
+      "FACTUAL"
+    ],
+    "max_tokens": 128,
+    "priority_levels": [
+      0
+    ],
+    "concurrency": null
+  },
+  "requests": [
+    {
+      "request_id": "req-heavy-0000",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 0,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0001",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 1,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0002",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 2,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0003",
+      "model": "benchmark-model",
+      "prompt": "What is the primary function of an asynchronous event loop in Python?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 3,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0004",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 4,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0005",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 5,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0006",
+      "model": "benchmark-model",
+      "prompt": "Describe the role of the Key-Value (KV) cache in autoregressive transformer inference.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 6,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0007",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 7,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0008",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 8,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0009",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 9,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0010",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 10,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0011",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 11,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0012",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 12,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0013",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 13,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0014",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 14,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0015",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 15,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0016",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 16,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0017",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 17,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0018",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 18,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0019",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 19,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0020",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 20,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0021",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 21,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0022",
+      "model": "benchmark-model",
+      "prompt": "List three standard cache replacement policies and describe their trade-offs.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 22,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0023",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 23,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0024",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 24,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0025",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 25,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0026",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 26,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0027",
+      "model": "benchmark-model",
+      "prompt": "Define backpressure in distributed queueing architectures and why it prevents out-of-memory crashes.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 27,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0028",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 28,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0029",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 29,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0030",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 30,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0031",
+      "model": "benchmark-model",
+      "prompt": "Explain the difference between process and thread execution models in operating systems.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 31,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0032",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 32,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0033",
+      "model": "benchmark-model",
+      "prompt": "Explain the difference between process and thread execution models in operating systems.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 33,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0034",
+      "model": "benchmark-model",
+      "prompt": "Define backpressure in distributed queueing architectures and why it prevents out-of-memory crashes.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 34,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0035",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 35,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0036",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 36,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0037",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 37,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0038",
+      "model": "benchmark-model",
+      "prompt": "What is the primary function of an asynchronous event loop in Python?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 38,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0039",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 39,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0040",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 40,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0041",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 41,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0042",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 42,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0043",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 43,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0044",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 44,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0045",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 45,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0046",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 46,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0047",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 47,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0048",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 48,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0049",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 49,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0050",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 50,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0051",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 51,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0052",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 52,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0053",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 53,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0054",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 54,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0055",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 55,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0056",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 56,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0057",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 57,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0058",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 58,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0059",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 59,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0060",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 60,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0061",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 61,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0062",
+      "model": "benchmark-model",
+      "prompt": "Define backpressure in distributed queueing architectures and why it prevents out-of-memory crashes.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 62,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0063",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 63,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0064",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 64,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0065",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 65,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0066",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 66,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0067",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 67,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0068",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 68,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0069",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 69,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0070",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 70,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0071",
+      "model": "benchmark-model",
+      "prompt": "Define backpressure in distributed queueing architectures and why it prevents out-of-memory crashes.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 71,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0072",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 72,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0073",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 73,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0074",
+      "model": "benchmark-model",
+      "prompt": "List three standard cache replacement policies and describe their trade-offs.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 74,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0075",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 75,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0076",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 76,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0077",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 77,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0078",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 78,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0079",
+      "model": "benchmark-model",
+      "prompt": "What is Amdahl's Law and how does it apply to parallel computing limits?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 79,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0080",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 80,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0081",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 81,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0082",
+      "model": "benchmark-model",
+      "prompt": "Explain the difference between process and thread execution models in operating systems.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 82,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0083",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 83,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0084",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 84,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0085",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 85,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0086",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 86,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0087",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 87,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0088",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 88,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0089",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 89,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0090",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 90,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0091",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 91,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0092",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 92,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0093",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 93,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0094",
+      "model": "benchmark-model",
+      "prompt": "Provide a one-sentence definition of Time-To-First-Token (TTFT).",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 94,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0095",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 95,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0096",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 96,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0097",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 97,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0098",
+      "model": "benchmark-model",
+      "prompt": "List three standard cache replacement policies and describe their trade-offs.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 98,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0099",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 99,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0100",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 100,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0101",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 101,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0102",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 102,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0103",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 103,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0104",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 104,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0105",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 105,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0106",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 106,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0107",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 107,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0108",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 108,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0109",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 109,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0110",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 110,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0111",
+      "model": "benchmark-model",
+      "prompt": "What is the primary function of an asynchronous event loop in Python?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 111,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0112",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 112,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0113",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 113,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0114",
+      "model": "benchmark-model",
+      "prompt": "What is the primary function of an asynchronous event loop in Python?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 114,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0115",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 115,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0116",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 116,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0117",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 117,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0118",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 118,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0119",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 119,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0120",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 120,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0121",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 121,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0122",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 122,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0123",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 123,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0124",
+      "model": "benchmark-model",
+      "prompt": "Explain the difference between process and thread execution models in operating systems.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 124,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0125",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 125,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0126",
+      "model": "benchmark-model",
+      "prompt": "What is the primary function of an asynchronous event loop in Python?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 126,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0127",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 127,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0128",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 128,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0129",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 129,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0130",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 130,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0131",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 131,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0132",
+      "model": "benchmark-model",
+      "prompt": "What is Amdahl's Law and how does it apply to parallel computing limits?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 132,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0133",
+      "model": "benchmark-model",
+      "prompt": "What is the primary function of an asynchronous event loop in Python?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 133,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0134",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 134,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0135",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 135,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0136",
+      "model": "benchmark-model",
+      "prompt": "Describe the role of the Key-Value (KV) cache in autoregressive transformer inference.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 136,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0137",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 137,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0138",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 138,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0139",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 139,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0140",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 140,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0141",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 141,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0142",
+      "model": "benchmark-model",
+      "prompt": "What is the distinction between prefill and decode phases during LLM token generation?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 142,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0143",
+      "model": "benchmark-model",
+      "prompt": "Define backpressure in distributed queueing architectures and why it prevents out-of-memory crashes.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 143,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0144",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 144,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0145",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 145,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0146",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 146,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0147",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 147,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0148",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 148,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0149",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 149,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0150",
+      "model": "benchmark-model",
+      "prompt": "Define backpressure in distributed queueing architectures and why it prevents out-of-memory crashes.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 150,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0151",
+      "model": "benchmark-model",
+      "prompt": "Define backpressure in distributed queueing architectures and why it prevents out-of-memory crashes.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 151,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0152",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 152,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0153",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 153,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0154",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 154,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0155",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 155,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0156",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 156,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0157",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 157,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0158",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 158,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0159",
+      "model": "benchmark-model",
+      "prompt": "What is the distinction between prefill and decode phases during LLM token generation?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 159,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0160",
+      "model": "benchmark-model",
+      "prompt": "What is the distinction between prefill and decode phases during LLM token generation?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 160,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0161",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 161,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0162",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 162,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0163",
+      "model": "benchmark-model",
+      "prompt": "What is the primary function of an asynchronous event loop in Python?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 163,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0164",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 164,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0165",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 165,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0166",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 166,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0167",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 167,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0168",
+      "model": "benchmark-model",
+      "prompt": "What is Amdahl's Law and how does it apply to parallel computing limits?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 168,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0169",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 169,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0170",
+      "model": "benchmark-model",
+      "prompt": "What is the primary function of an asynchronous event loop in Python?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 170,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0171",
+      "model": "benchmark-model",
+      "prompt": "What is Amdahl's Law and how does it apply to parallel computing limits?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 171,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0172",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 172,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0173",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 173,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0174",
+      "model": "benchmark-model",
+      "prompt": "How does priority queueing prevent head-of-line blocking in multi-tenant schedulers?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 174,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0175",
+      "model": "benchmark-model",
+      "prompt": "List three standard cache replacement policies and describe their trade-offs.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 175,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0176",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 176,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0177",
+      "model": "benchmark-model",
+      "prompt": "What is memory bandwidth saturation in modern GPU architectures?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 177,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0178",
+      "model": "benchmark-model",
+      "prompt": "Context: Large Language Model serving infrastructure must balance multiple conflicting objectives: minimizing latency for interactive users, maximizing aggregate token throughput for background batch jobs, and maintaining predictable tail latencies under fluctuating request volumes. Traditional static batching buffers requests until a fixed batch size is reached, introducing queue delay during low-traffic periods. Dynamic batching introduces a configurable wait window to amortize kernel launch overhead. In contrast, token-level continuous batching operates at the iteration granularity, dynamically inserting newly arrived requests into the active generation pool and retiring finished sequences immediately. However, continuous batching requires sophisticated paged memory management to eliminate external memory fragmentation. Question: Based on the provided context, contrast the queue delay and memory fragmentation characteristics of static batching, dynamic batching, and iteration-level continuous batching.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 178,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0179",
+      "model": "benchmark-model",
+      "prompt": "Summarize the benefits of dynamic batching in LLM serving in three bullet points.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 179,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0180",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 180,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0181",
+      "model": "benchmark-model",
+      "prompt": "Describe the architectural trade-offs between Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) when serving multi-tenant LLM workloads with heterogeneous prompt lengths.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 181,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0182",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 182,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0183",
+      "model": "benchmark-model",
+      "prompt": "List three standard cache replacement policies and describe their trade-offs.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 183,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0184",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 184,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0185",
+      "model": "benchmark-model",
+      "prompt": "Write a detailed design explanation for a token-bucket rate limiter, discussing burst capacity handling, thread-safety, and graceful backpressure mechanisms.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 185,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0186",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 186,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0187",
+      "model": "benchmark-model",
+      "prompt": "Describe the role of the Key-Value (KV) cache in autoregressive transformer inference.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 187,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0188",
+      "model": "benchmark-model",
+      "prompt": "Explain how continuous batching differs from static batching in LLM serving. Include considerations for dynamic sequence lengths, memory allocation, and KV-cache management.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 188,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0189",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 189,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0190",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 190,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0191",
+      "model": "benchmark-model",
+      "prompt": "Why does high temperature increase output entropy during token sampling?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 191,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0192",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 192,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0193",
+      "model": "benchmark-model",
+      "prompt": "What is the time complexity of binary heap insertion and extraction?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 193,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0194",
+      "model": "benchmark-model",
+      "prompt": "What is Amdahl's Law and how does it apply to parallel computing limits?",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 194,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0195",
+      "model": "benchmark-model",
+      "prompt": "Discuss strategies for prefix caching in multi-turn conversational AI systems, focusing on radix trees and cache eviction policies under bounded GPU memory.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 195,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0196",
+      "model": "benchmark-model",
+      "prompt": "Define backpressure in distributed queueing architectures and why it prevents out-of-memory crashes.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "FACTUAL",
+        "index": 196,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0197",
+      "model": "benchmark-model",
+      "prompt": "Context: In distributed inference systems, model routing and load balancing play a critical role in optimizing hardware utilization across heterogeneous clusters. Naive round-robin or least-connections balancers fail to account for KV cache locality, leading to redundant prefill computation when identical prompt prefixes are routed to arbitrary instances. Cache-aware routing algorithms construct global prefix indices to steer incoming requests toward worker instances that already hold relevant KV cache pages. However, strict cache affinity can cause load imbalance if a popular prefix creates a hotspot on a single worker node. Hybrid routing policies combine prefix affinity scoring with real-time queue depth and memory utilization telemetry to achieve optimal global performance. Question: Analyze how hybrid cache-aware routing balances prefix reuse with load distribution, and identify failure modes when popularity skew creates worker hotspots.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "LONG",
+        "index": 197,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0198",
+      "model": "benchmark-model",
+      "prompt": "Explain the concept of Inter-Token Latency (ITL) for streaming inference.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "SHORT",
+        "index": 198,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    },
+    {
+      "request_id": "req-heavy-0199",
+      "model": "benchmark-model",
+      "prompt": "Analyze how memory bandwidth saturation limits decoding throughput in large language models compared to compute saturation during the prefill phase.",
+      "priority": 0,
+      "max_tokens": 128,
+      "temperature": 0.7,
+      "metadata": {
+        "category": "MEDIUM",
+        "index": 199,
+        "seed": 42
+      },
+      "scheduled_delay_ms": 0.0
+    }
+  ],
+  "created_at": 1788730066.585173
+}

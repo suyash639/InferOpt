@@ -2,7 +2,7 @@
 
 from typing import Protocol, runtime_checkable
 
-from inferopt.core.models import InferenceRequest, InferenceResponse
+from inferopt.core.models import InferenceBatch, InferenceRequest, InferenceResponse
 
 
 @runtime_checkable
@@ -25,5 +25,29 @@ class InferenceBackend(Protocol):
 
         Raises:
             InferenceError: If generation fails during backend execution.
+        """
+        ...
+
+
+@runtime_checkable
+class BatchInferenceBackend(Protocol):
+    """Abstract protocol for backends that natively support batched inference execution."""
+
+    @property
+    def backend_name(self) -> str:
+        """Unique identifier representing the backend engine implementation."""
+        ...
+
+    async def generate_batch(self, batch: InferenceBatch) -> list[InferenceResponse]:
+        """Execute a batch of inference generation requests asynchronously.
+
+        Args:
+            batch: The validated domain inference batch.
+
+        Returns:
+            List of InferenceResponse instances corresponding to requests in the batch.
+
+        Raises:
+            InferenceError: If batch generation fails during backend execution.
         """
         ...
