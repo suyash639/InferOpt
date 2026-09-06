@@ -1,23 +1,14 @@
-"""Core domain models, interfaces, and exceptions for InferOpt."""
+"""Scheduler-specific exception definitions."""
 
 from inferopt.core.exceptions import (
-    BackendError,
-    InferenceError,
-    InferOptError,
     QueueFullError,
     RequestCancelledError,
     SchedulerError,
     SchedulerNotRunningError,
     SchedulerShutdownError,
 )
-from inferopt.core.models import InferenceRequest, InferenceResponse
 
 __all__ = [
-    "BackendError",
-    "InferOptError",
-    "InferenceError",
-    "InferenceRequest",
-    "InferenceResponse",
     "QueueFullError",
     "RequestCancelledError",
     "SchedulerError",
