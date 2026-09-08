@@ -299,6 +299,37 @@ class Scheduler:
                 self._safe_record(self._collector.record_queue_depth, self._queue.qsize())
             raise
 
+    def apply_config(self, new_config: SchedulerConfig) -> None:
+        """Safely and atomically apply a new configuration to the running scheduler.
+
+        Updates concurrency limits and dynamic batching parameters. In-flight
+        batches continue uninterrupted, and queued requests remain intact and
+        are processed according to the updated configuration.
+
+        Args:
+            new_config: Validated SchedulerConfig instance.
+
+        Raises:
+            TypeError: If new_config is not an instance of SchedulerConfig.
+        """
+        if not isinstance(new_config, SchedulerConfig):
+            raise TypeError(f"Expected SchedulerConfig instance, got {type(new_config).__name__}")
+
+        self._config = new_config
+
+        if self._is_running and not self._is_shutting_down:
+            self._workers = [w for w in self._workers if not w.done()]
+            current_worker_count = len(self._workers)
+            target_concurrency = new_config.max_concurrency
+
+            if target_concurrency > current_worker_count:
+                for i in range(current_worker_count, target_concurrency):
+                    task = asyncio.create_task(
+                        self._worker_loop(worker_id=i),
+                        name=f"inferopt-worker-{i}",
+                    )
+                    self._workers.append(task)
+
     def get_status(self, request_id: str) -> RequestStatus | None:
         """Get the current lifecycle state of a request by its ID."""
         record = self._records.get(request_id)
@@ -310,12 +341,15 @@ class Scheduler:
 
     async def _worker_loop(self, worker_id: int) -> None:
         """Internal worker task processing batches of queued requests concurrently."""
-        batch_cfg = self._config.batch_config
-        max_batch_size = batch_cfg.max_batch_size
-        batch_wait_sec = batch_cfg.batch_wait_ms / 1000.0
-        backend_name = getattr(self._backend, "backend_name", "unknown")
-
         while self._is_running:
+            if worker_id >= self._config.max_concurrency:
+                break
+
+            batch_cfg = self._config.batch_config
+            max_batch_size = batch_cfg.max_batch_size
+            batch_wait_sec = batch_cfg.batch_wait_ms / 1000.0
+            backend_name = getattr(self._backend, "backend_name", "unknown")
+
             try:
                 _, _, raw_item = await self._queue.get()
             except asyncio.CancelledError:

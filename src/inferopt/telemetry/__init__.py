@@ -2,6 +2,7 @@
 
 from inferopt.telemetry.collector import MetricsCollector
 from inferopt.telemetry.models import (
+    AdaptationEvent,
     BatchMetrics,
     BatchStats,
     MetricsSnapshot,
@@ -12,6 +13,7 @@ from inferopt.telemetry.models import (
 )
 
 __all__ = [
+    "AdaptationEvent",
     "BatchMetrics",
     "BatchStats",
     "MetricsCollector",

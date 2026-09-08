@@ -213,3 +213,58 @@ class MetricsSnapshot(BaseModel):
         default_factory=dict,
         description="Optional metadata or tags attached to the snapshot.",
     )
+
+
+class AdaptationEvent(BaseModel):
+    """Immutable telemetry event recorded when an adaptive control decision is evaluated."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_id: str = Field(
+        ...,
+        min_length=1,
+        description="Unique identifier for this adaptation event.",
+    )
+    window_id: int = Field(
+        ...,
+        ge=0,
+        description="Evaluation window index.",
+    )
+    decision: str = Field(
+        ...,
+        min_length=1,
+        description="Decision type string (e.g. APPLY, REJECT, COOLDOWN, ROLLBACK).",
+    )
+    previous_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Scheduler configuration parameters prior to evaluation.",
+    )
+    new_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Scheduler configuration parameters proposed or applied.",
+    )
+    current_score: float | None = Field(
+        default=None,
+        description="Objective score of the current configuration.",
+    )
+    proposed_score: float | None = Field(
+        default=None,
+        description="Objective score of the proposed candidate configuration.",
+    )
+    improvement_pct: float | None = Field(
+        default=None,
+        description="Calculated percentage improvement over baseline.",
+    )
+    reason: str = Field(
+        ...,
+        min_length=1,
+        description="Explainable human-readable justification for the decision.",
+    )
+    is_applied: bool = Field(
+        default=False,
+        description="True if the proposed configuration was applied to the scheduler.",
+    )
+    recorded_at: float = Field(
+        default_factory=time.perf_counter,
+        description="Monotonic timestamp when the event was recorded.",
+    )

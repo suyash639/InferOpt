@@ -7,6 +7,7 @@ from typing import Any
 
 from inferopt.scheduler.lifecycle import RequestStatus
 from inferopt.telemetry.models import (
+    AdaptationEvent,
     BatchMetrics,
     BatchStats,
     MetricsSnapshot,
@@ -37,21 +38,23 @@ class MetricsCollector:
     """Thread-safe, in-process metrics aggregator and telemetry recorder.
 
     Records request lifecycle metrics, batch formations, queue depths,
-    and active concurrency counts. Produces immutable point-in-time snapshots
-    with computed averages, percentiles, and throughput estimates.
+    active concurrency counts, and adaptive control decisions. Produces
+    immutable point-in-time snapshots with computed averages, percentiles,
+    and throughput estimates.
     """
 
     def __init__(self, max_history: int = 10000) -> None:
         """Initialize the metrics collector.
 
         Args:
-            max_history: Maximum number of request and batch metrics retained in memory.
+            max_history: Maximum number of metrics and events retained in memory.
         """
         self._max_history = max_history
         self._lock = threading.Lock()
 
         self._requests: list[RequestMetrics] = []
         self._batches: list[BatchMetrics] = []
+        self._adaptations: list[AdaptationEvent] = []
 
         self._current_queue_depth: int = 0
         self._peak_queue_depth: int = 0
@@ -127,11 +130,35 @@ class MetricsCollector:
         with self._lock:
             return tuple(self._batches[-limit:])
 
+    def record_adaptation(self, event: AdaptationEvent) -> None:
+        """Record an evaluated or applied adaptation decision event.
+
+        Args:
+            event: Validated immutable AdaptationEvent record.
+        """
+        with self._lock:
+            self._adaptations.append(event)
+            if len(self._adaptations) > self._max_history:
+                self._adaptations = self._adaptations[-self._max_history :]
+
+    def recent_adaptations(self, limit: int = 100) -> tuple[AdaptationEvent, ...]:
+        """Return the most recent adaptation events up to the specified limit.
+
+        Args:
+            limit: Maximum number of recent adaptation events to return.
+
+        Returns:
+            Tuple of recent AdaptationEvent records.
+        """
+        with self._lock:
+            return tuple(self._adaptations[-limit:])
+
     def reset(self) -> None:
         """Reset all recorded metrics, peaks, and observation counters."""
         with self._lock:
             self._requests.clear()
             self._batches.clear()
+            self._adaptations.clear()
             self._current_queue_depth = 0
             self._peak_queue_depth = 0
             self._current_active_requests = 0

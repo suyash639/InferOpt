@@ -1,5 +1,12 @@
-"""Inference workload optimization and dynamic policy tuning."""
+"""Inference workload optimization, deterministic tuning, and adaptive closed-loop control."""
 
+from inferopt.optimizer.adaptation_models import (
+    AdaptationDecision,
+    AdaptationDecisionType,
+    AdaptationPolicy,
+    AdaptationRecord,
+)
+from inferopt.optimizer.controller import AdaptiveController
 from inferopt.optimizer.engine import DeterministicOptimizer, calculate_objective_score
 from inferopt.optimizer.models import (
     CandidateEvaluation,
@@ -12,6 +19,11 @@ from inferopt.optimizer.models import (
 )
 
 __all__ = [
+    "AdaptationDecision",
+    "AdaptationDecisionType",
+    "AdaptationPolicy",
+    "AdaptationRecord",
+    "AdaptiveController",
     "CandidateEvaluation",
     "CandidateSpace",
     "DeterministicOptimizer",
