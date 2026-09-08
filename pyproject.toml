@@ -41,6 +41,9 @@ mlx = [
     "mlx>=0.22.0",
     "mlx-lm>=0.21.0",
 ]
+vllm = [
+    "vllm>=0.6.0",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/inferopt"]

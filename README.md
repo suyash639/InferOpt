@@ -611,9 +611,44 @@ All validation results are persisted in JSON format under `benchmarks/results/ml
 
 ---
 
+## vLLM Backend Integration (NVIDIA GPU Serving)
+
+InferOpt integrates with [vLLM](https://github.com/vllm-project/vllm) for high-throughput GPU serving in production environments.
+
+### Architectural Separation
+* **vLLM as the Engine**: vLLM handles low-level CUDA execution, PagedAttention, KV-cache memory management, and token generation kernels.
+* **InferOpt as the Control Plane**: InferOpt sits above vLLM, managing multi-tenant prioritization, dynamic batching windows, bounded concurrency, closed-loop telemetry adaptation, and model routing.
+* **Native Batched Generation**: `VLLMBackend.generate_batch()` uses vLLM's native batch generation API (`LLM.generate(prompts=..., sampling_params=...)`) without synthetic gathering loops.
+
+### Optional Installation
+vLLM is an optional dependency and is not required for core InferOpt development on Apple Silicon or CI:
+
+```bash
+# Install InferOpt with vLLM support (requires Linux + NVIDIA CUDA GPU)
+pip install -e ".[vllm]"
+```
+
+### CLI Smoke Test (NVIDIA GPU)
+
+```bash
+# Run vLLM smoke test with default model (Qwen/Qwen2.5-0.5B-Instruct)
+python -m inferopt.backends.vllm --prompt "Explain what InferOpt does in one sentence."
+
+# Run with custom parameters
+python -m inferopt.backends.vllm \
+    --model Qwen/Qwen2.5-0.5B-Instruct \
+    --max-tokens 48 \
+    --temperature 0.0 \
+    --gpu-memory-utilization 0.9 \
+    --tensor-parallel-size 1
+```
+
+---
+
 ## Development Environment
 
-- **Local Platform**: Developed and validated on Apple Silicon (macOS M1) with zero direct hardware coupling in the core library.
-- **Backend Portability**: The system architecture enforces a backend-agnostic design using strict Python protocols. This allows full local development and testing using mock or MLX backends without requiring local NVIDIA GPU hardware, while ensuring immediate compatibility with vLLM when deployed to GPU infrastructure.
+- **Local Platform**: Developed and validated on Apple Silicon (macOS) with zero direct hardware coupling in the core library.
+- **Backend Portability**: The system architecture enforces a backend-agnostic design using strict Python protocols (`InferenceBackend`, `BatchInferenceBackend`). This allows full local development and testing using mock or MLX backends without requiring local NVIDIA GPU hardware, while ensuring immediate compatibility with vLLM when deployed to GPU infrastructure.
+
 
 
