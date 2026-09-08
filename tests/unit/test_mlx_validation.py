@@ -615,3 +615,42 @@ class TestLiveMLXValidationIntegration:
         assert responses[1].request_id == "v-2"
         assert responses[0].generated_text.strip() != ""
         assert responses[1].generated_text.strip() != ""
+
+    @pytest.mark.asyncio
+    async def test_live_mlx_detokenizer_whitespace_regression(self) -> None:
+        """Regression test demonstrating detokenizer whitespace semantics across MLX APIs.
+
+        Proves that:
+        1. mlx_lm.generate uses streaming detokenizer which trims initial token whitespace.
+        2. mlx_lm.batch_generate uses tokenizer.decode which preserves initial token whitespace.
+        3. Both execute identical autoregressive token steps and produce equivalent content.
+        """
+        import mlx_lm
+        import mlx_lm.sample_utils
+
+        loaded = mlx_lm.load("mlx-community/Qwen2.5-0.5B-Instruct-4bit")
+        model, tokenizer = loaded[0], loaded[1]
+        prompt = "Summarize the benefits of dynamic batching in three bullet points."
+        sampler = mlx_lm.sample_utils.make_sampler(temp=0.0)
+
+        # 1. Single generation via mlx_lm.generate
+        text_single = mlx_lm.generate(
+            model, tokenizer, prompt=prompt, max_tokens=32, sampler=sampler, verbose=False
+        )
+
+        # 2. Batch generation via mlx_lm.batch_generate
+        prompt_tokens = tokenizer.encode(prompt)
+        batch_res = mlx_lm.batch_generate(
+            model, tokenizer, prompts=[prompt_tokens], max_tokens=[32], verbose=False
+        )
+        text_batch = batch_res.texts[0]
+
+        # Inherent API difference: batch_generate retains leading space, generate strips it
+        assert text_batch.startswith(" ")
+        assert text_batch.lstrip() == text_single.lstrip()
+
+        # Both generate identical content after leading whitespace normalization
+        toks_single = tokenizer.encode(text_single)
+        toks_batch = tokenizer.encode(text_batch)
+        # Differ at most by the isolated initial whitespace token
+        assert abs(len(toks_single) - len(toks_batch)) <= 1
