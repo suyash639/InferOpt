@@ -178,7 +178,7 @@ def generate_workload(config: WorkloadConfig) -> WorkloadScenario:
                 prompt=prompt_text,
                 priority=priority,
                 max_tokens=config.max_tokens,
-                temperature=0.7,
+                temperature=config.temperature,
                 metadata={
                     "category": category.value,
                     "index": i,
@@ -297,7 +297,75 @@ def get_long_context_workload(seed: int = 42) -> WorkloadScenario:
     return generate_workload(config)
 
 
+def get_single_workload(seed: int = 42) -> WorkloadScenario:
+    """Single request validation workload for baseline correctness and token accounting."""
+    config = WorkloadConfig(
+        scenario_name="single",
+        description="Single request workload: 1 request with short prompt",
+        num_requests=1,
+        arrival_pattern=ArrivalPattern.SEQUENTIAL,
+        seed=seed,
+        prompt_categories=(PromptCategory.SHORT,),
+        max_tokens=32,
+        priority_levels=(0,),
+    )
+    return generate_workload(config)
+
+
+def get_concurrent_4_workload(seed: int = 42) -> WorkloadScenario:
+    """4 concurrent requests validation workload."""
+    config = WorkloadConfig(
+        scenario_name="concurrent_4",
+        description="Concurrent 4 workload: 4 concurrent requests with short/factual prompts",
+        num_requests=4,
+        arrival_pattern=ArrivalPattern.CONCURRENT,
+        seed=seed,
+        prompt_categories=(PromptCategory.SHORT, PromptCategory.FACTUAL),
+        max_tokens=32,
+        priority_levels=(0,),
+    )
+    return generate_workload(config)
+
+
+def get_concurrent_8_workload(seed: int = 42) -> WorkloadScenario:
+    """8 concurrent requests validation workload."""
+    config = WorkloadConfig(
+        scenario_name="concurrent_8",
+        description="Concurrent 8 workload: 8 concurrent requests with short/factual prompts",
+        num_requests=8,
+        arrival_pattern=ArrivalPattern.CONCURRENT,
+        seed=seed,
+        prompt_categories=(PromptCategory.SHORT, PromptCategory.FACTUAL),
+        max_tokens=32,
+        priority_levels=(0,),
+    )
+    return generate_workload(config)
+
+
+def get_concurrent_16_workload(seed: int = 42) -> WorkloadScenario:
+    """16 concurrent requests validation workload."""
+    config = WorkloadConfig(
+        scenario_name="concurrent_16",
+        description="Concurrent 16 workload: 16 concurrent requests with mixed prompts",
+        num_requests=16,
+        arrival_pattern=ArrivalPattern.CONCURRENT,
+        seed=seed,
+        prompt_categories=(
+            PromptCategory.SHORT,
+            PromptCategory.FACTUAL,
+            PromptCategory.MEDIUM,
+        ),
+        max_tokens=32,
+        priority_levels=(0,),
+    )
+    return generate_workload(config)
+
+
 PRESET_SCENARIOS: Final[dict[str, Callable[[int], WorkloadScenario]]] = {
+    "single": get_single_workload,
+    "concurrent_4": get_concurrent_4_workload,
+    "concurrent_8": get_concurrent_8_workload,
+    "concurrent_16": get_concurrent_16_workload,
     "light": get_light_workload,
     "medium": get_medium_workload,
     "heavy": get_heavy_workload,

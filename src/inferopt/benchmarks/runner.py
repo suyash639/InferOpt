@@ -57,8 +57,9 @@ class BenchmarkRunner:
 
         start_time = time.perf_counter()
 
+        raw_results: list[InferenceResponse | Exception] = []
         async with Scheduler(backend=backend, config=config, collector=collector) as scheduler:
-            await self._dispatch_workload(scheduler, scenario)
+            raw_results = await self._dispatch_workload(scheduler, scenario)
 
         duration_sec = max(0.0001, time.perf_counter() - start_time)
         snapshot = collector.snapshot(metadata=metadata)
@@ -73,6 +74,7 @@ class BenchmarkRunner:
         tokens_per_sec = total_tokens / duration_sec if duration_sec > 0 else 0.0
 
         backend_name = getattr(backend, "backend_name", "unknown")
+        completed_responses = tuple(r for r in raw_results if isinstance(r, InferenceResponse))
 
         return BenchmarkResult(
             benchmark_id=f"bench-{uuid.uuid4().hex[:8]}",
@@ -102,6 +104,7 @@ class BenchmarkRunner:
             total_batches=snapshot.batches.total_batches,
             avg_batch_size=snapshot.batches.avg_batch_size,
             max_batch_size=snapshot.batches.max_batch_size,
+            responses=completed_responses,
             metadata=dict(metadata or {}),
         )
 

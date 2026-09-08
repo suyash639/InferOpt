@@ -4,12 +4,36 @@ import argparse
 import asyncio
 import sys
 from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from inferopt.backends.mock import MockBackend
 from inferopt.benchmarks.generator import PRESET_SCENARIOS, generate_workload
 from inferopt.benchmarks.models import WorkloadConfig
 from inferopt.benchmarks.runner import BenchmarkRunner
 from inferopt.scheduler.config import BatchConfig, SchedulerConfig
+
+if TYPE_CHECKING:
+    from inferopt.backends.base import InferenceBackend
+
+
+class _ConcurrencyAction(argparse.Action):
+    """Parse concurrency as a single int if 1 value, or list of ints if multiple."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        if isinstance(values, (list, tuple)):
+            int_vals = [int(v) for v in values]
+            if len(int_vals) == 1:
+                setattr(namespace, self.dest, int_vals[0])
+            else:
+                setattr(namespace, self.dest, int_vals)
+        elif isinstance(values, (str, int)):
+            setattr(namespace, self.dest, int(values))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,9 +65,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--concurrency",
         "-c",
-        type=int,
+        nargs="+",
+        action=_ConcurrencyAction,
         default=None,
-        help="Scheduler max_concurrency override.",
+        help="Scheduler max_concurrency override (or list of concurrencies for audit).",
+    )
+    parser.add_argument(
+        "--batch-sizes",
+        type=int,
+        nargs="+",
+        default=None,
+        help="List of maximum batch sizes to evaluate in audit or matrix (e.g. 1 2 4 8).",
     )
     parser.add_argument(
         "--max-batch-size",
@@ -58,6 +90,46 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Scheduler batch_config.batch_wait_ms override.",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["mock", "mlx"],
+        default="mock",
+        help="Inference backend implementation to evaluate (default: mock).",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+        help="Model identifier when using MLX backend "
+        "(default: mlx-community/Qwen2.5-0.5B-Instruct-4bit).",
+    )
+    parser.add_argument(
+        "--validate-mlx",
+        action="store_true",
+        help="Run Step 8.5 controlled Direct MLX vs InferOpt validation experiment.",
+    )
+    parser.add_argument(
+        "--audit",
+        action="store_true",
+        help="Run complete 6-condition scientific MLX audit across concurrency and batch levels.",
+    )
+    parser.add_argument(
+        "--batch-matrix",
+        action="store_true",
+        help="Run batching experiment matrix (concurrency 4,8,16 x batch 1,2,4,8).",
+    )
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=None,
+        help="Warmup requests before timing (default: 2 for audit, 1 otherwise).",
+    )
+    parser.add_argument(
+        "--repetitions",
+        type=int,
+        default=None,
+        help="Measured repetition trials (default: 5 for audit, 3 otherwise).",
     )
     parser.add_argument(
         "--output",
@@ -77,12 +149,160 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def run_benchmark_cli(args: argparse.Namespace) -> int:
     """Execute benchmark run with arguments parsed from CLI."""
-    scenario_factory = PRESET_SCENARIOS.get(args.scenario)
-    if scenario_factory is None:
+    # Step 8.5: Controlled MLX Validation / Scientific Audit Mode
+    if args.validate_mlx:
+        from inferopt.benchmarks.mlx_validation import (
+            MLXValidator,
+            format_audit_full_report,
+            format_comparison_table,
+            format_matrix_table,
+        )
+
+        validator = MLXValidator(model_id=args.model)
+
+        # Audit Mode: 6-Condition Scientific Matrix across Concurrency & Batch Sizes
+        if args.audit:
+            scenario_name = args.scenario if args.scenario != "light" else "concurrent_4"
+            scenario_factory = PRESET_SCENARIOS.get(scenario_name, PRESET_SCENARIOS["concurrent_4"])
+            scenario = scenario_factory(args.seed)
+
+            # Apply request count override if specified
+            if args.num_requests is not None and args.num_requests > 0:
+                cfg_dict = scenario.config.model_dump()
+                cfg_dict["num_requests"] = args.num_requests
+                scenario = generate_workload(WorkloadConfig.model_validate(cfg_dict))
+
+            warmup_count = args.warmup if args.warmup is not None else 2
+            repetitions = args.repetitions if args.repetitions is not None else 5
+
+            if args.concurrency is not None:
+                if isinstance(args.concurrency, list):
+                    concurrencies = tuple(args.concurrency)
+                else:
+                    concurrencies = (args.concurrency,)
+            else:
+                concurrencies = (1, 4, 8)
+
+            if args.batch_sizes is not None:
+                batch_sizes = tuple(args.batch_sizes)
+            elif args.max_batch_size is not None:
+                batch_sizes = (args.max_batch_size,)
+            else:
+                batch_sizes = (1, 2, 4, 8)
+
+            out_path = args.output
+            if out_path is None:
+                out_path = f"benchmarks/results/mlx_audit/{scenario.scenario_name}.json"
+
+            print("\n" + "=" * 80)
+            print("  STARTING INFEROPT SCIENTIFIC MLX AUDIT (Step 8.5)")
+            print("=" * 80)
+            print(f"  Model ID:      {args.model}")
+            req_info = f"{len(scenario.requests)} requests, seed={args.seed}"
+            print(f"  Scenario:      {scenario.scenario_name} ({req_info})")
+            print(f"  Concurrency:   {concurrencies}")
+            print(f"  Batch Sizes:   {batch_sizes}")
+            print(f"  Repetitions:   {repetitions} (Warmup: {warmup_count})")
+            print(f"  Output JSON:   {out_path}")
+            print("=" * 80 + "\n")
+
+            report = await validator.run_audit_experiment(
+                scenario=scenario,
+                concurrencies=concurrencies,
+                batch_sizes=batch_sizes,
+                warmup_count=warmup_count,
+                repetitions=repetitions,
+                output_path=out_path,
+            )
+
+            print()
+            print(format_audit_full_report(report))
+            print(f"\nSaved structured audit JSON report to: {out_path}")
+            return 0 if report.integrity.is_valid else 1
+
+        if args.batch_matrix:
+            warmup_count = args.warmup if args.warmup is not None else 1
+            if args.concurrency is not None:
+                if isinstance(args.concurrency, list):
+                    concurrencies = tuple(args.concurrency)
+                else:
+                    concurrencies = (args.concurrency,)
+            else:
+                concurrencies = (4, 8, 16)
+            batch_sizes = tuple(args.batch_sizes) if args.batch_sizes is not None else (1, 2, 4, 8)
+
+            print("\nExecuting InferOpt MLX Batching Experiment Matrix...")
+            matrix_report = await validator.run_batch_matrix(
+                concurrencies=concurrencies,
+                batch_sizes=batch_sizes,
+                warmup_count=warmup_count,
+                output_path=args.output,
+            )
+            print()
+            print(format_matrix_table(matrix_report))
+            if args.output:
+                print(f"\nSaved batch matrix results to: {args.output}")
+            return 0
+
+        # Legacy 2-way validation mode
+        val_factory = PRESET_SCENARIOS.get(args.scenario)
+        if val_factory is None:
+            print(f"Error: Unknown scenario '{args.scenario}'", file=sys.stderr)
+            return 1
+        scenario = val_factory(args.seed)
+
+        warmup_count = args.warmup if args.warmup is not None else 1
+        repetitions = args.repetitions if args.repetitions is not None else 3
+
+        print(f"\nExecuting MLX Validation Experiment on '{scenario.scenario_name}'...")
+        print(f"Model: {args.model} | Repetitions: {repetitions} | Warmup: {warmup_count}")
+
+        default_sched = SchedulerConfig()
+        max_batch_size = (
+            args.max_batch_size
+            if args.max_batch_size is not None
+            else default_sched.batch_config.max_batch_size
+        )
+        batch_wait_ms = (
+            args.batch_wait_ms
+            if args.batch_wait_ms is not None
+            else default_sched.batch_config.batch_wait_ms
+        )
+        if args.concurrency is not None:
+            max_concurrency = (
+                args.concurrency[0] if isinstance(args.concurrency, list) else args.concurrency
+            )
+        else:
+            max_concurrency = default_sched.max_concurrency
+
+        sched_config = SchedulerConfig(
+            max_concurrency=max_concurrency,
+            batch_config=BatchConfig(max_batch_size=max_batch_size, batch_wait_ms=batch_wait_ms),
+        )
+
+        out_path = args.output
+        if out_path is None:
+            out_path = f"benchmarks/results/mlx_validation/{scenario.scenario_name}.json"
+
+        report_legacy = await validator.run_validation_experiment(
+            scenario=scenario,
+            warmup_count=warmup_count,
+            repetitions=repetitions,
+            scheduler_config=sched_config,
+            output_path=out_path,
+        )
+
+        print()
+        print(format_comparison_table(report_legacy))
+        print(f"\nSaved validation report to: {out_path}")
+        return 0 if report_legacy.correctness_gate.is_valid else 1
+
+    main_factory = PRESET_SCENARIOS.get(args.scenario)
+    if main_factory is None:
         print(f"Error: Unknown scenario '{args.scenario}'", file=sys.stderr)
         return 1
 
-    scenario = scenario_factory(args.seed)
+    scenario = main_factory(args.seed)
 
     # Apply request count override if specified
     if args.num_requests is not None and args.num_requests > 0:
@@ -100,14 +320,24 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
     batch_wait_ms = (
         args.batch_wait_ms if args.batch_wait_ms is not None else default_batch.batch_wait_ms
     )
-    max_concurrency = (
-        args.concurrency if args.concurrency is not None else default_sched.max_concurrency
-    )
+    if args.concurrency is not None:
+        max_concurrency = (
+            args.concurrency[0] if isinstance(args.concurrency, list) else args.concurrency
+        )
+    else:
+        max_concurrency = default_sched.max_concurrency
 
     batch_cfg = BatchConfig(max_batch_size=max_batch_size, batch_wait_ms=batch_wait_ms)
     sched_config = SchedulerConfig(max_concurrency=max_concurrency, batch_config=batch_cfg)
 
-    backend = MockBackend(default_latency_sec=0.005)
+    backend: InferenceBackend
+    if args.backend == "mlx":
+        from inferopt.backends.mlx import MLXBackend
+
+        backend = MLXBackend(model_id=args.model)
+    else:
+        backend = MockBackend(default_latency_sec=0.005)
+
     runner = BenchmarkRunner()
 
     if args.verbose:
@@ -117,7 +347,7 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
         scenario=scenario,
         backend=backend,
         scheduler_config=sched_config,
-        metadata={"cli": True, "seed": args.seed},
+        metadata={"cli": True, "seed": args.seed, "backend": args.backend},
     )
 
     separator = "=" * 60

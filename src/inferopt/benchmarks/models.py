@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from inferopt.core.models import InferenceRequest
+from inferopt.core.models import InferenceRequest, InferenceResponse
 from inferopt.scheduler.config import BatchConfig, SchedulerConfig
 from inferopt.telemetry.models import MetricsSnapshot
 
@@ -134,6 +134,15 @@ class WorkloadConfig(BaseModel):
     priority_levels: tuple[int, ...] = Field(
         default=(0,),
         description="Set of priority values sampled during generation.",
+    )
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        description=(
+            "Generation temperature for sampled requests "
+            "(defaults to 0.0 for deterministic benchmarking)."
+        ),
     )
     concurrency: int | None = Field(
         default=None,
@@ -332,6 +341,10 @@ class BenchmarkResult(BaseModel):
         ...,
         ge=0,
         description="Maximum batch size formed during the run.",
+    )
+    responses: tuple[InferenceResponse, ...] = Field(
+        default_factory=tuple,
+        description="Completed inference response objects captured during the run.",
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,

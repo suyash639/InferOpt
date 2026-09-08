@@ -114,7 +114,18 @@ class TestPresetScenarios:
         assert all(len(r.prompt) > 200 for r in w.requests)
 
     def test_preset_scenarios_registry(self) -> None:
-        expected = {"light", "medium", "heavy", "burst", "mixed", "long_context"}
+        expected = {
+            "single",
+            "concurrent_4",
+            "concurrent_8",
+            "concurrent_16",
+            "light",
+            "medium",
+            "heavy",
+            "burst",
+            "mixed",
+            "long_context",
+        }
         assert set(PRESET_SCENARIOS.keys()) == expected
         for name, factory in PRESET_SCENARIOS.items():
             w = factory(42)

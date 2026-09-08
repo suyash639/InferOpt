@@ -24,9 +24,9 @@ InferOpt acts as an adaptive, intelligent control and optimization layer that op
 
 ## Current Status
 
-**Stage 6 — Deterministic Optimization Engine Foundation**
+**Stage 8.5 — Real MLX Validation & Controlled Baseline**
 
-InferOpt provides an asynchronous request scheduler (`Scheduler`), dynamic batching subsystem (`BatchConfig`, `InferenceBatch`), in-process telemetry layer (`MetricsCollector`, `MetricsSnapshot`), deterministic benchmarking framework (`WorkloadScenario`, `BenchmarkRunner`), and a deterministic optimization engine (`DeterministicOptimizer`, `CandidateSpace`, `ObjectiveConfig`, `OptimizationConstraints`). The optimization engine evaluates empirical benchmark results against multi-criteria objectives and constraints, ranking configurations using a deterministic tie-breaking hierarchy and generating grid-search experiment plans.
+InferOpt provides an asynchronous request scheduler (`Scheduler`), dynamic batching subsystem (`BatchConfig`, `InferenceBatch`), in-process telemetry layer (`MetricsCollector`, `MetricsSnapshot`), deterministic benchmarking framework (`WorkloadScenario`, `BenchmarkRunner`), deterministic optimization engine (`DeterministicOptimizer`, `CandidateSpace`), closed-loop adaptive controller (`AdaptiveController`, `AdaptationPolicy`), real local Apple Silicon LLM execution via `MLXBackend` (`mlx` and `mlx-lm`), and a reproducible validation framework (`MLXValidator`, `DirectMLXRunner`) comparing Direct MLX execution against InferOpt-mediated execution under identical workloads and machine conditions.
 
 ---
 
@@ -50,22 +50,28 @@ InferOpt provides an asynchronous request scheduler (`Scheduler`), dynamic batch
     |                                                                         |
     |  +---------------------+  +--------------------+  +------------------+  |
     |  |  Request Scheduler  |  |   Router & Load    |  | Workload Engine  |  |
-    |  | & Dynamic Batching  |  |     Balancer       |  | & Benchmark (S5) |  |
-    |  +----------+----------+  +---------+----------+  +--------+---------+  |
-    |             |                       |                      |            |
-    |             +-----------------------+----------------------+            |
-    |                                     |                                   |
-    |                                     v                                   |
-    |                        +-------------------------+                      |
-    |                        | Telemetry & Feedback    |                      |
-    |                        | (MetricsCollector, ITL) |                      |
-    |                        +------------+------------+                      |
-    |                                     |                                   |
-    |                                     v                                   |
-    |                        +-------------------------+                      |
-    |                        |  Deterministic Optimizer|                      |
-    |                        |  & Planner Engine (S6)  |                      |
-    |                        +------------+------------+                      |
+    |  | & Dynamic Batching  |<---+ Balancer         |  | & Benchmark (S5) |  |
+    |  +----------+----------+  | +---------+----------+  +--------+---------+  |
+    |             |             |           |                      |            |
+    |             +-------------|-----------+----------------------+            |
+    |                           |           |                                   |
+    |                           |           v                                   |
+    |                           |  +-------------------------+                  |
+    |                           |  | Telemetry & Feedback    |                  |
+    |                           |  | (MetricsCollector, ITL) |                  |
+    |                           |  +------------+------------+                  |
+    |                           |               |                               |
+    |                           |               v                               |
+    |                           |  +-------------------------+                  |
+    |                           |  |  Deterministic Optimizer|                  |
+    |                           |  |  & Planner Engine (S6)  |                  |
+    |                           |  +------------+------------+                  |
+    |                           |               |                               |
+    |                           |               v                               |
+    |                           |  +-------------------------+                  |
+    |                           +--|   Adaptive Controller   |                  |
+    |         (Runtime Config      |  & Closed-Loop (S7)     |                  |
+    |          Modulation)         +-------------------------+                  |
     +-------------------------------------|-----------------------------------+
                                           |
                                           v
@@ -350,6 +356,100 @@ print(f"Generated {len(experiment_plan)} experimental configurations to run.")
 
 ---
 
+## Adaptive Scheduling & Closed-Loop Control
+
+> [!IMPORTANT]
+> **Step 7 introduces deterministic closed-loop adaptation. It does not use machine learning or an LLM to make scheduling decisions.**
+>
+> The adaptive controller safely modulates live scheduler concurrency and dynamic batching parameters based on observed telemetry windows. All adaptation is conservative, bounded, and explainable, governed by hard anti-oscillation constraints and automated rollback safeguards.
+
+```text
+       +-------------------------------------------------------------+
+       |                      Observed Telemetry                     |
+       |                (MetricsSnapshot / BenchmarkResult)          |
+       +------------------------------+------------------------------+
+                                      |
+                                      v
+       +-------------------------------------------------------------+
+       |                      AdaptiveController                     |
+       |                                                             |
+       |  1. Evaluation Window Gate (min requests & batches)         |
+       |  2. Rollback Check (SLA violation / performance drop)       |
+       |  3. Cooldown Counter Gate (anti-thrashing)                  |
+       |  4. Candidate Ranking (via DeterministicOptimizer)          |
+       |  5. Improvement Threshold & Hysteresis Gate                 |
+       |  6. Safety Bounds Enforcement (min/max limits)              |
+       |  7. Emits Explainable AdaptationDecision                    |
+       +------------------------------+------------------------------+
+                                      | (If Decision == APPLY/ROLLBACK)
+                                      v
+       +-------------------------------------------------------------+
+       |                Scheduler.apply_config()                     |
+       |                                                             |
+       |  - Atomic config update                                     |
+       |  - Dynamic worker pool adjustment                           |
+       |  - Active tasks & queued requests fully preserved           |
+       |  - Telemetry adaptation event recorded                      |
+       +-------------------------------------------------------------+
+```
+
+### Closed-Loop Adaptation Architecture
+
+1. **Evaluation Windows**: The controller never adapts on a single noisy request. Decisions require evidence thresholds (`min_completed_requests` and `min_completed_batches`). If data is insufficient, it emits an `INSUFFICIENT_DATA` decision.
+2. **Improvement Threshold & Hysteresis**: Candidates must exceed a configurable relative (`min_improvement_pct`) or absolute (`min_improvement_abs`) threshold over baseline performance to prevent switching on minor metric fluctuations.
+3. **Cooldown Gating**: Following any configuration update, the controller enforces a cooldown window (`cooldown_windows`) during which further switches are suppressed with a `COOLDOWN` decision.
+4. **Safety Bounds Enforcement**: Candidate configurations must strictly satisfy operational bounds (`min_concurrency`, `max_concurrency`, `min_batch_size`, `max_batch_size`, `min_batch_wait_ms`, `max_batch_wait_ms`).
+5. **Hard SLA & Constraint Protection**: Candidates that violate hard latency limits ($p95$) or throughput constraints are rejected with `INFEASIBLE`.
+6. **Automated Rollback**: If an applied configuration subsequently violates an SLA constraint or degrades objective performance by $\ge \text{rollback\_degradation\_pct}$, the controller immediately issues a `ROLLBACK` decision and reverts the scheduler to the previous known-good configuration.
+
+### Runtime Configuration Semantics (`apply_config`)
+
+When `scheduler.apply_config(new_config)` is invoked on a live running `Scheduler`:
+- **Atomicity**: The configuration object (`self._config`) and batch settings are atomically replaced.
+- **Worker Scaling**:
+  - **Scale Up**: If `max_concurrency` increases, new worker tasks are spawned immediately.
+  - **Scale Down**: If `max_concurrency` decreases, excess workers finish their current batch and cleanly retire without dropping queued requests.
+- **Queue Preservation**: All pending requests in the priority queue remain valid, ordered, and untouched. They are formed into subsequent batches according to the updated `BatchConfig`.
+- **In-Flight Tasks**: Currently executing batches continue on backend runtimes without interruption.
+- **Telemetry Observability**: An immutable `AdaptationEvent` is recorded in `MetricsCollector`.
+
+### Example Usage
+
+```python
+from inferopt.optimizer import (
+    AdaptationPolicy,
+    AdaptiveController,
+    ObjectiveConfig,
+    OptimizationConstraints,
+    OptimizationObjectiveType,
+)
+from inferopt.scheduler import Scheduler
+
+# 1. Define adaptive policy
+policy = AdaptationPolicy(
+    objective=ObjectiveConfig(objective_type=OptimizationObjectiveType.BALANCED),
+    constraints=OptimizationConstraints(max_p95_latency_ms=35.0),
+    min_improvement_pct=10.0,
+    cooldown_windows=2,
+    min_completed_requests=30,
+    min_completed_batches=5,
+    enable_rollback=True,
+)
+
+# 2. Attach to running scheduler
+controller = AdaptiveController(policy=policy, scheduler=scheduler)
+
+# 3. Observe metrics snapshot and step controller
+snapshot = scheduler.collector.snapshot()
+decision = controller.step(snapshot, candidate_evidence=candidates)
+
+if decision.is_applied:
+    print(f"Applied new configuration: {decision.proposed_config}")
+    print(f"Reason: {decision.reason}")
+```
+
+---
+
 ## Inference Backend Abstraction
 
 ```text
@@ -361,32 +461,159 @@ print(f"Generated {len(experiment_plan)} experimental configurations to run.")
                               v
                +-----------------------------+
                |    <<InferenceBackend>>     |
-               |      (Async Protocol)       |
+               |  <<BatchInferenceBackend>>  |
+               |      (Async Protocols)      |
                +--------------+--------------+
                               |
               +---------------+---------------+
               |                               |
-              v                               v (Upcoming)
+              v                               v
      +-----------------+             +-------------------+
-     |   MockBackend   |             | MLX / vLLM Engine |
-     | (Deterministic  |             | (Hardware-backed  |
-     |  & GPU-free)    |             |  Execution)       |
+     |   MockBackend   |             |    MLXBackend     |
+     | (Deterministic  |             | (Apple Silicon    |
+     |  & GPU-free)    |             |  Metal GPU / MLX) |
      +-----------------+             +-------------------+
 ```
 
 ### Why Backend Abstraction?
-Direct dependencies on specific serving engines (like vLLM or MLX) bind control-plane logic to particular hardware platforms, external C++ extensions, and heavyweight dependencies. By introducing the `InferenceBackend` protocol, InferOpt standardizes request handling, token accounting, and latency telemetry across all execution engines.
+Direct dependencies on specific serving engines (like vLLM or MLX) bind control-plane logic to particular hardware platforms, external C++ extensions, and heavyweight dependencies. By introducing the `InferenceBackend` and `BatchInferenceBackend` protocols, InferOpt standardizes request handling, token accounting, and latency telemetry across all execution engines.
 
 ### Purpose of MockBackend
 The `MockBackend` provides a deterministic, GPU-free simulation runtime that:
 - Executes asynchronously without requiring local GPU acceleration or heavy model weights.
 - Produces deterministic, reproducible text outputs and token metrics for any given input request.
 - Simulates configurable asynchronous execution latency to test schedulers, queues, and admission control under controlled timing conditions.
-- Facilitates rapid unit testing and CI pipelines on developer workstations (including Apple Silicon M1).
+- Facilitates rapid unit testing and CI pipelines on developer workstations.
+
+---
+
+## MLX Backend on Apple Silicon
+
+> [!IMPORTANT]
+> **Step 8 integrates real local execution on Apple Silicon; it does not claim GPU performance superiority for InferOpt.**
+>
+> The MLX backend executes real transformer models using Apple's `mlx` and `mlx-lm` libraries, leveraging Metal unified memory on macOS. It enables local end-to-end inference verification, tokenizer accounting, and hardware execution under the InferOpt control plane. Performance comparisons against external GPU serving engines (e.g., vLLM on NVIDIA GPUs) require subsequent cluster benchmarks.
+
+### Key Capabilities
+
+1. **Lazy Loading & Resource Management**: Model weights and tokenizers are loaded on demand during the first inference request with thread-safe locking (`asyncio.Lock`). Resources can be cleanly unloaded via `unload_model()`.
+2. **Deterministic Sampling**: Default sampling temperature is set to `0.0` (greedy argmax) for reproducible evaluation.
+3. **Exact Tokenizer Accounting**: Calculates exact prompt and generated token counts via Hugging Face tokenizers rather than synthetic approximations.
+4. **Hardware-Level Batched Generation**: Single requests use `mlx_lm.generate` while formed batches execute natively on Metal using `mlx_lm.batch_generate` without synthetic loops.
+5. **Zero Required Dependencies**: The core `inferopt` package has zero MLX dependencies. MLX is configured as an optional extra (`pip install "inferopt[mlx]"`).
+
+### Installation
+
+```bash
+# Install InferOpt with Apple Silicon MLX support
+pip install -e ".[mlx]"
+```
+
+### CLI Smoke Test
+
+Verify local MLX execution with the built-in smoke test entry point:
+
+```bash
+# Run local smoke test with default model (mlx-community/Qwen2.5-0.5B-Instruct-4bit)
+python -m inferopt.backends.mlx --prompt "Explain what InferOpt does in one sentence."
+
+# Run smoke test with custom model and token limit
+python -m inferopt.backends.mlx \
+    --model mlx-community/Qwen2.5-0.5B-Instruct-4bit \
+    --prompt "List three key features of an LLM scheduler." \
+    --max-tokens 48 \
+    --temperature 0.0
+```
+
+### Benchmark with MLX Backend
+
+Run InferOpt benchmark workloads against real Apple Silicon inference:
+
+```bash
+# Run the light benchmark scenario using MLX backend
+python -m inferopt.benchmarks --scenario light --backend mlx
+
+# Run burst benchmark scenario with MLX backend and custom model
+python -m inferopt.benchmarks \
+    --scenario burst \
+    --backend mlx \
+    --model mlx-community/Qwen2.5-0.5B-Instruct-4bit \
+    --num-requests 20 \
+    --max-batch-size 4
+```
+
+---
+
+## Step 8.5 — Real MLX Validation & Controlled Baseline
+
+> [!IMPORTANT]
+> **Step 8.5 validates real MLX execution and establishes a reproducible local baseline. It does not establish that InferOpt outperforms direct MLX.**
+>
+> The purpose of Step 8.5 is to rigorously compare Direct MLX execution (unmediated baseline) against InferOpt + MLXBackend under identical workload definitions, models, seeds, decoding parameters, warmup procedures, and machine conditions.
+
+### Validation Methodology
+
+```text
+                  +--------------------------------+
+                  | Workload Scenario (Fixed Seed) |
+                  +---------------+----------------+
+                                  |
+            +---------------------+---------------------+
+            |                                           |
+            v                                           v
++-----------------------+                   +-----------------------+
+|    DirectMLXRunner    |                   |    BenchmarkRunner    |
+| (Unmediated Baseline) |                   | (Scheduler + Batching)|
++-----------+-----------+                   +-----------+-----------+
+            |                                           |
+            v                                           v
++-----------------------+                   +-----------------------+
+|  DirectMLXResult (3x) |                   |  BenchmarkResult (3x) |
++-----------+-----------+                   +-----------+-----------+
+            |                                           |
+            +---------------------+---------------------+
+                                  |
+                                  v
+                  +--------------------------------+
+                  |         Correctness Gate       |
+                  |  - Exact 1:1 ID preservation   |
+                  |  - Valid non-empty output text |
+                  |  - Non-negative token counts   |
+                  +---------------+----------------+
+                                  |
+                                  v
+                  +--------------------------------+
+                  | Neutral Metric Comparison Table|
+                  |     (p50, p95, TPS, Deltas)    |
+                  +--------------------------------+
+```
+
+1. **Experimental Invariance**: Both pipelines evaluate the exact same sequence of requests, prompt texts, `max_tokens`, `temperature=0.0`, and random seed.
+2. **Warmup Separation**: Executes a configurable number of warmup requests (default: 1) before timed measurement. Warmup outputs and timings are discarded and recorded in metadata.
+3. **Repeated Trials**: Executes multiple measured repetitions (default: 3) for warm measurements, reporting mean, median, pooled $p50/p95/p99$ percentiles, throughput, and sample standard deviation.
+4. **Correctness Gating**: Verifies completion counts, duplicate ID absence, non-empty outputs, and non-negative token counts before presenting comparisons.
+5. **Batching Matrix**: Evaluates concurrency ($4, 8, 16$) across dynamic batch sizes ($1, 2, 4, 8$) to quantify hardware batching amortization on Metal unified memory.
+
+### Running Validation Experiments
+
+```bash
+# 1. Run controlled comparison on single request scenario
+python -m inferopt.benchmarks --validate-mlx --scenario single --warmup 1 --repetitions 3
+
+# 2. Run controlled comparison on 4 concurrent requests
+python -m inferopt.benchmarks --validate-mlx --scenario concurrent_4 --warmup 1 --repetitions 3
+
+# 3. Run full batching experiment matrix (4,8,16 concurrency x 1,2,4,8 batch size)
+python -m inferopt.benchmarks --validate-mlx --batch-matrix
+```
+
+All validation results are persisted in JSON format under `benchmarks/results/mlx_validation/`.
 
 ---
 
 ## Development Environment
 
-- **Local Platform**: Developed and validated on Apple Silicon (macOS M1) with zero direct hardware coupling.
+- **Local Platform**: Developed and validated on Apple Silicon (macOS M1) with zero direct hardware coupling in the core library.
 - **Backend Portability**: The system architecture enforces a backend-agnostic design using strict Python protocols. This allows full local development and testing using mock or MLX backends without requiring local NVIDIA GPU hardware, while ensuring immediate compatibility with vLLM when deployed to GPU infrastructure.
+
+
