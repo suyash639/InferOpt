@@ -93,21 +93,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--backend",
-        choices=["mock", "mlx"],
+        choices=["mock", "mlx", "vllm"],
         default="mock",
         help="Inference backend implementation to evaluate (default: mock).",
     )
     parser.add_argument(
         "--model",
         type=str,
-        default="mlx-community/Qwen2.5-0.5B-Instruct-4bit",
-        help="Model identifier when using MLX backend "
-        "(default: mlx-community/Qwen2.5-0.5B-Instruct-4bit).",
+        default=None,
+        help="Model identifier (defaults: mlx-community/Qwen2.5-0.5B-Instruct-4bit for MLX, "
+        "Qwen/Qwen2.5-0.5B-Instruct for vLLM).",
     )
     parser.add_argument(
         "--validate-mlx",
         action="store_true",
         help="Run Step 8.5 controlled Direct MLX vs InferOpt validation experiment.",
+    )
+    parser.add_argument(
+        "--validate-vllm",
+        action="store_true",
+        help="Run Step 10 controlled Direct vLLM vs InferOpt scientific benchmark experiment.",
     )
     parser.add_argument(
         "--audit",
@@ -123,13 +128,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--warmup",
         type=int,
         default=None,
-        help="Warmup requests before timing (default: 2 for audit, 1 otherwise).",
+        help="Warmup requests before timing (default: 2 for audit/vLLM, 1 otherwise).",
     )
     parser.add_argument(
         "--repetitions",
         type=int,
         default=None,
-        help="Measured repetition trials (default: 5 for audit, 3 otherwise).",
+        help="Measured repetition trials (default: 3 for vLLM, 5 for audit, 3 otherwise).",
     )
     parser.add_argument(
         "--output",
@@ -149,8 +154,80 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def run_benchmark_cli(args: argparse.Namespace) -> int:
     """Execute benchmark run with arguments parsed from CLI."""
+    # Step 10: Controlled Scientific vLLM Benchmark Mode
+    if args.validate_vllm:
+        from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID
+        from inferopt.benchmarks.vllm_validation import (
+            VLLMValidator,
+            format_vllm_full_report,
+        )
+
+        model_id = args.model if args.model is not None else DEFAULT_VLLM_MODEL_ID
+        validator = VLLMValidator(model_id=model_id)
+
+        scenario_name = args.scenario if args.scenario != "light" else "concurrent_4"
+        scenario_factory = PRESET_SCENARIOS.get(scenario_name, PRESET_SCENARIOS["concurrent_4"])
+        scenario = scenario_factory(args.seed)
+
+        if args.num_requests is not None and args.num_requests > 0:
+            cfg_dict = scenario.config.model_dump()
+            cfg_dict["num_requests"] = args.num_requests
+            scenario = generate_workload(WorkloadConfig.model_validate(cfg_dict))
+
+        warmup_count = args.warmup if args.warmup is not None else 2
+        repetitions = args.repetitions if args.repetitions is not None else 3
+
+        if args.concurrency is not None:
+            if isinstance(args.concurrency, list):
+                concurrencies = tuple(args.concurrency)
+            else:
+                concurrencies = (args.concurrency,)
+        else:
+            concurrencies = (1, 4, 8, 16)
+
+        if args.batch_sizes is not None:
+            batch_sizes = tuple(args.batch_sizes)
+        elif args.max_batch_size is not None:
+            batch_sizes = (args.max_batch_size,)
+        else:
+            batch_sizes = (1, 2, 4, 8)
+
+        batch_wait_ms = args.batch_wait_ms if args.batch_wait_ms is not None else 50.0
+
+        out_dir = args.output
+        if out_dir is None:
+            out_dir = "benchmarks/results/vllm"
+
+        print("\n" + "=" * 80)
+        print("  STARTING INFEROPT SCIENTIFIC VLLM BENCHMARK (Step 10)")
+        print("=" * 80)
+        print(f"  Model ID:      {model_id}")
+        req_info = f"{len(scenario.requests)} requests, seed={args.seed}"
+        print(f"  Scenario:      {scenario.scenario_name} ({req_info})")
+        print(f"  Concurrency:   {concurrencies}")
+        print(f"  Batch Sizes:   {batch_sizes}")
+        print(f"  Repetitions:   {repetitions} (Warmup: {warmup_count})")
+        print(f"  Output Dir:    {out_dir}")
+        print("=" * 80 + "\n")
+
+        report = await validator.run_scientific_benchmark(
+            scenario=scenario,
+            concurrency_levels=concurrencies,
+            batch_sizes=batch_sizes,
+            warmup_count=warmup_count,
+            repetitions=repetitions,
+            batch_wait_ms=batch_wait_ms,
+            output_dir=out_dir,
+        )
+
+        print()
+        print(format_vllm_full_report(report))
+        print(f"\nSaved structured vLLM benchmark JSON report to: {out_dir}")
+        return 0 if report.integrity.is_valid else 1
+
     # Step 8.5: Controlled MLX Validation / Scientific Audit Mode
     if args.validate_mlx:
+        from inferopt.backends.mlx import DEFAULT_MODEL_ID as DEFAULT_MLX_MODEL_ID
         from inferopt.benchmarks.mlx_validation import (
             MLXValidator,
             format_audit_full_report,
@@ -158,7 +235,8 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
             format_matrix_table,
         )
 
-        validator = MLXValidator(model_id=args.model)
+        mlx_model_id = args.model if args.model is not None else DEFAULT_MLX_MODEL_ID
+        validator_mlx = MLXValidator(model_id=mlx_model_id)
 
         # Audit Mode: 6-Condition Scientific Matrix across Concurrency & Batch Sizes
         if args.audit:
@@ -197,7 +275,7 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
             print("\n" + "=" * 80)
             print("  STARTING INFEROPT SCIENTIFIC MLX AUDIT (Step 8.5)")
             print("=" * 80)
-            print(f"  Model ID:      {args.model}")
+            print(f"  Model ID:      {mlx_model_id}")
             req_info = f"{len(scenario.requests)} requests, seed={args.seed}"
             print(f"  Scenario:      {scenario.scenario_name} ({req_info})")
             print(f"  Concurrency:   {concurrencies}")
@@ -206,7 +284,7 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
             print(f"  Output JSON:   {out_path}")
             print("=" * 80 + "\n")
 
-            report = await validator.run_audit_experiment(
+            report_audit = await validator_mlx.run_audit_experiment(
                 scenario=scenario,
                 concurrencies=concurrencies,
                 batch_sizes=batch_sizes,
@@ -216,9 +294,9 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
             )
 
             print()
-            print(format_audit_full_report(report))
+            print(format_audit_full_report(report_audit))
             print(f"\nSaved structured audit JSON report to: {out_path}")
-            return 0 if report.integrity.is_valid else 1
+            return 0 if report_audit.integrity.is_valid else 1
 
         if args.batch_matrix:
             warmup_count = args.warmup if args.warmup is not None else 1
@@ -232,7 +310,7 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
             batch_sizes = tuple(args.batch_sizes) if args.batch_sizes is not None else (1, 2, 4, 8)
 
             print("\nExecuting InferOpt MLX Batching Experiment Matrix...")
-            matrix_report = await validator.run_batch_matrix(
+            matrix_report = await validator_mlx.run_batch_matrix(
                 concurrencies=concurrencies,
                 batch_sizes=batch_sizes,
                 warmup_count=warmup_count,
@@ -255,7 +333,7 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
         repetitions = args.repetitions if args.repetitions is not None else 3
 
         print(f"\nExecuting MLX Validation Experiment on '{scenario.scenario_name}'...")
-        print(f"Model: {args.model} | Repetitions: {repetitions} | Warmup: {warmup_count}")
+        print(f"Model: {mlx_model_id} | Repetitions: {repetitions} | Warmup: {warmup_count}")
 
         default_sched = SchedulerConfig()
         max_batch_size = (
@@ -284,7 +362,7 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
         if out_path is None:
             out_path = f"benchmarks/results/mlx_validation/{scenario.scenario_name}.json"
 
-        report_legacy = await validator.run_validation_experiment(
+        report_legacy = await validator_mlx.run_validation_experiment(
             scenario=scenario,
             warmup_count=warmup_count,
             repetitions=repetitions,
@@ -332,9 +410,14 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
 
     backend: InferenceBackend
     if args.backend == "mlx":
+        from inferopt.backends.mlx import DEFAULT_MODEL_ID as DEFAULT_MLX_MODEL_ID
         from inferopt.backends.mlx import MLXBackend
 
-        backend = MLXBackend(model_id=args.model)
+        backend = MLXBackend(model_id=args.model or DEFAULT_MLX_MODEL_ID)
+    elif args.backend == "vllm":
+        from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID, VLLMBackend
+
+        backend = VLLMBackend(model=args.model or DEFAULT_VLLM_MODEL_ID)
     else:
         backend = MockBackend(default_latency_sec=0.005)
 

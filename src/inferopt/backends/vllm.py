@@ -465,6 +465,29 @@ def _cli_smoke_test() -> None:
         action="store_true",
         help="Trust remote code from HuggingFace",
     )
+    parser.add_argument(
+        "--scheduler",
+        action="store_true",
+        help="Run end-to-end Scheduler dynamic batching smoke test (4 requests)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=4,
+        help="Max batch size for scheduler dynamic batching (default: 4)",
+    )
+    parser.add_argument(
+        "--batch-wait-ms",
+        type=float,
+        default=50.0,
+        help="Dynamic batch formation wait window in ms (default: 50.0)",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=2,
+        help="Max concurrency for scheduler (default: 2)",
+    )
     args = parser.parse_args()
 
     async def _run() -> None:
@@ -472,12 +495,12 @@ def _cli_smoke_test() -> None:
         print("InferOpt vLLM Backend Smoke Test")
         print("=" * 60)
         print(f"Model ID:                {args.model}")
-        print(f"Prompt:                  {args.prompt}")
         print(f"Max Tokens:              {args.max_tokens}")
         print(f"Temperature:             {args.temperature}")
         print(f"GPU Memory Utilization:  {args.gpu_memory_utilization}")
         print(f"Tensor Parallel Size:    {args.tensor_parallel_size}")
         print(f"Data Type:               {args.dtype}")
+        print(f"Scheduler Mode:          {args.scheduler}")
         print("-" * 60)
         print("Initializing vLLM engine...")
 
@@ -498,32 +521,101 @@ def _cli_smoke_test() -> None:
         t_load_ms = (time.perf_counter() - t_load_start) * 1000.0
         print(f"vLLM engine loaded successfully in {t_load_ms:.2f}ms.")
 
-        req = InferenceRequest(
-            request_id="vllm-smoke-1",
-            model=args.model,
-            prompt=args.prompt,
-            max_tokens=args.max_tokens,
-            temperature=args.temperature,
-        )
+        if args.scheduler:
+            # End-to-end scheduler dynamic batching smoke test
+            from inferopt.scheduler.config import BatchConfig, SchedulerConfig
+            from inferopt.scheduler.scheduler import Scheduler
+            from inferopt.telemetry.collector import MetricsCollector
 
-        print("-" * 60)
-        print("Executing inference generation...")
-        t_gen_start = time.perf_counter()
-        response = await backend.generate(req)
-        t_total_ms = (time.perf_counter() - t_gen_start) * 1000.0
+            scheduler_config = SchedulerConfig(
+                max_concurrency=args.concurrency,
+                batch_config=BatchConfig(
+                    max_batch_size=args.batch_size,
+                    batch_wait_ms=args.batch_wait_ms,
+                ),
+            )
+            collector = MetricsCollector()
 
-        out_tokens = response.output_tokens or 0
-        tps = (out_tokens / (response.latency_ms / 1000.0)) if response.latency_ms > 0 else 0.0
+            prompts = [
+                "Explain what InferOpt does in one sentence.",
+                "What are the benefits of dynamic batching in LLM serving?",
+                "How does speculative decoding improve inference throughput?",
+                "Describe the role of key-value cache in transformer generation.",
+            ]
+            requests = [
+                InferenceRequest(
+                    request_id=f"vllm-e2e-smoke-{i + 1}",
+                    model=args.model,
+                    prompt=prompt,
+                    max_tokens=args.max_tokens,
+                    temperature=args.temperature,
+                )
+                for i, prompt in enumerate(prompts)
+            ]
 
-        print("-" * 60)
-        print(f"Generated Output:\n{response.generated_text}")
-        print("-" * 60)
-        print(f"Input Tokens:      {response.input_tokens}")
-        print(f"Output Tokens:     {response.output_tokens}")
-        print(f"Backend Latency:   {response.latency_ms:.2f}ms")
-        print(f"Total Turnaround:  {t_total_ms:.2f}ms")
-        print(f"Output Throughput: {tps:.2f} tokens/sec")
-        print("=" * 60)
+            print("-" * 60)
+            print(f"Submitting {len(requests)} requests through Scheduler + Dynamic Batching...")
+            t_start = time.perf_counter()
+
+            async with Scheduler(
+                backend=backend,
+                config=scheduler_config,
+                collector=collector,
+            ) as scheduler:
+                responses = await asyncio.gather(*[scheduler.submit(r) for r in requests])
+
+            t_total_sec = max(0.0001, time.perf_counter() - t_start)
+            snapshot = collector.snapshot()
+            req_stats = snapshot.requests
+            batch_stats = snapshot.batches
+
+            print("\nInferOpt VLLM E2E Smoke Test")
+            print("----------------------------")
+            print(f"Backend: {backend.__class__.__name__}")
+            print(f"Requests: {req_stats.total_requests}")
+            print(f"Completed: {req_stats.completed_requests}")
+            print(f"Failed: {req_stats.failed_requests}")
+            print(f"Batches: {batch_stats.total_batches}")
+            print(f"Average batch size: {batch_stats.avg_batch_size:.1f}")
+            print(f"p50 latency: {req_stats.p50_total_latency_ms:.2f} ms")
+            print(f"p95 latency: {req_stats.p95_total_latency_ms:.2f} ms")
+            throughput = req_stats.completed_requests / t_total_sec
+            print(f"Throughput: {throughput:.2f} req/s")
+            print("=" * 60)
+
+            for resp in responses:
+                print(
+                    f"[{resp.request_id}] (tokens: in={resp.input_tokens}, "
+                    f"out={resp.output_tokens}, lat={resp.latency_ms:.1f}ms):"
+                )
+                print(f"  {resp.generated_text.strip()[:120]}...\n")
+        else:
+            req = InferenceRequest(
+                request_id="vllm-smoke-1",
+                model=args.model,
+                prompt=args.prompt,
+                max_tokens=args.max_tokens,
+                temperature=args.temperature,
+            )
+
+            print("-" * 60)
+            print("Executing inference generation...")
+            t_gen_start = time.perf_counter()
+            response = await backend.generate(req)
+            t_total_ms = (time.perf_counter() - t_gen_start) * 1000.0
+
+            out_tokens = response.output_tokens or 0
+            tps = (out_tokens / (response.latency_ms / 1000.0)) if response.latency_ms > 0 else 0.0
+
+            print("-" * 60)
+            print(f"Generated Output:\n{response.generated_text}")
+            print("-" * 60)
+            print(f"Input Tokens:      {response.input_tokens}")
+            print(f"Output Tokens:     {response.output_tokens}")
+            print(f"Backend Latency:   {response.latency_ms:.2f}ms")
+            print(f"Total Turnaround:  {t_total_ms:.2f}ms")
+            print(f"Output Throughput: {tps:.2f} tokens/sec")
+            print("=" * 60)
 
     asyncio.run(_run())
 

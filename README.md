@@ -616,32 +616,49 @@ All validation results are persisted in JSON format under `benchmarks/results/ml
 InferOpt integrates with [vLLM](https://github.com/vllm-project/vllm) for high-throughput GPU serving in production environments.
 
 ### Architectural Separation
-* **vLLM as the Engine**: vLLM handles low-level CUDA execution, PagedAttention, KV-cache memory management, and token generation kernels.
-* **InferOpt as the Control Plane**: InferOpt sits above vLLM, managing multi-tenant prioritization, dynamic batching windows, bounded concurrency, closed-loop telemetry adaptation, and model routing.
-* **Native Batched Generation**: `VLLMBackend.generate_batch()` uses vLLM's native batch generation API (`LLM.generate(prompts=..., sampling_params=...)`) without synthetic gathering loops.
+* **vLLM as the Engine**: vLLM provides the underlying inference engine, handling low-level CUDA execution, PagedAttention, KV-cache memory management, and token generation kernels.
+* **InferOpt as the Control Plane**: InferOpt sits above vLLM, managing multi-tenant prioritization, dynamic batch formation windows, bounded concurrency, backpressure, closed-loop telemetry adaptation, and model routing.
+* **Native Batched Generation**: `VLLMBackend.generate_batch()` executes formed batches using vLLM's native batch generation API (`LLM.generate(prompts=..., sampling_params=...)`) without synthetic gathering loops.
 
 ### Optional Installation
-vLLM is an optional dependency and is not required for core InferOpt development on Apple Silicon or CI:
+vLLM is an optional dependency and is not required for core InferOpt development on Apple Silicon or CPU CI environments:
 
 ```bash
 # Install InferOpt with vLLM support (requires Linux + NVIDIA CUDA GPU)
 pip install -e ".[vllm]"
 ```
 
-### CLI Smoke Test (NVIDIA GPU)
+### Scientific Real-vLLM Benchmark Harness (Step 10)
+
+InferOpt provides a scientifically controlled benchmark harness to evaluate serving overhead, batching efficiency, and latency-throughput tradeoffs against real vLLM on NVIDIA GPUs (e.g. Kaggle T4).
+
+#### Experimental Conditions
+* **Condition A (Direct vLLM)**: Unmediated execution directly invoking `vllm.LLM` without the InferOpt scheduler (baseline).
+* **Condition B (InferOpt Batch 1)**: Full InferOpt scheduler and telemetry pipeline with `max_batch_size = 1`.
+* **Condition C (InferOpt Batch 2)**: Dynamic batching with `max_batch_size = 2`.
+* **Condition D (InferOpt Batch 4)**: Dynamic batching with `max_batch_size = 4`.
+* **Condition E (InferOpt Batch 8)**: Dynamic batching with `max_batch_size = 8`.
+
+#### Scientific Controls
+* **Workload Replay & Hash**: Workloads are generated once and assigned a deterministic SHA-256 hash. The identical sequence of prompts, request IDs, and sampling parameters is replayed across every condition.
+* **Warmup & Cold-Start Isolation**: Engine initialization, CUDA memory allocation, and warmup iterations are explicitly separated from steady-state timing.
+* **Repetition Aggregation**: Multiple trials (default: 3) collect mean, median (p50), min, max, and sample standard deviations without cherry-picking.
+* **Integrity Gate**: Automatically verifies 100% request completion, 1:1 ID preservation, non-empty outputs, real tokenizer token counts, and identical workload hashes before results are accepted.
+* **Differential Overhead**: Formally calculates the end-to-end differential overhead relative to Direct vLLM.
 
 ```bash
-# Run vLLM smoke test with default model (Qwen/Qwen2.5-0.5B-Instruct)
-python -m inferopt.backends.vllm --prompt "Explain what InferOpt does in one sentence."
+# Run full 5-condition scientific benchmark on NVIDIA GPU
+python -m inferopt.benchmarks.cli --validate-vllm \
+    --concurrency 1 4 8 16 \
+    --batch-sizes 1 2 4 8 \
+    --repetitions 3 \
+    --warmup 2
 
-# Run with custom parameters
-python -m inferopt.backends.vllm \
-    --model Qwen/Qwen2.5-0.5B-Instruct \
-    --max-tokens 48 \
-    --temperature 0.0 \
-    --gpu-memory-utilization 0.9 \
-    --tensor-parallel-size 1
+# Or run via standalone script
+python scripts/run_vllm_benchmark.py --concurrency 1 4 8 16 --batch-sizes 1 2 4 8
 ```
+
+Results are persisted as structured JSON in `benchmarks/results/vllm/`.
 
 ---
 
