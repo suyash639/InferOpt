@@ -18,6 +18,8 @@ class TestBenchmarkCLI:
         assert args.concurrency is None
         assert args.max_batch_size is None
         assert args.batch_wait_ms is None
+        assert args.validate_vllm is False
+        assert args.enforce_eager is False
         assert args.output is None
         assert args.verbose is False
 
@@ -37,6 +39,8 @@ class TestBenchmarkCLI:
                 "16",
                 "--batch-wait-ms",
                 "25.5",
+                "--validate-vllm",
+                "--enforce-eager",
                 "--output",
                 "/tmp/test_result.json",
                 "--verbose",
@@ -48,6 +52,8 @@ class TestBenchmarkCLI:
         assert args.concurrency == 8
         assert args.max_batch_size == 16
         assert args.batch_wait_ms == 25.5
+        assert args.validate_vllm is True
+        assert args.enforce_eager is True
         assert args.output == "/tmp/test_result.json"
         assert args.verbose is True
 

@@ -162,7 +162,18 @@ class TestVLLMBenchmarkModelsAndIntegrity:
         assert meta.repetitions == 3
         assert meta.workload_seed == 42
         assert meta.workload_hash == "abc123hash"
+        assert meta.enforce_eager is False
         assert meta.python_version != ""
+
+        meta_eager = collect_vllm_environment_metadata(
+            model_id="mock-model",
+            warmup_count=1,
+            repetitions=1,
+            workload_seed=42,
+            workload_hash="abc123hash",
+            enforce_eager=True,
+        )
+        assert meta_eager.enforce_eager is True
 
     def test_integrity_validation_success(self) -> None:
         scenario = get_concurrent_4_workload(seed=42)
@@ -527,6 +538,26 @@ class TestDirectVLLMRunnerMocked:
             assert all(r.success for r in result.request_results)
             assert all(r.output_tokens == 8 for r in result.request_results)
 
+    @pytest.mark.asyncio
+    async def test_direct_runner_enforce_eager_propagation(self) -> None:
+        mock_vllm = _setup_mock_vllm_module()
+        runner = DirectVLLMRunner(
+            model_id=DEFAULT_VLLM_MODEL_ID,
+            enforce_eager=True,
+        )
+        with patch.dict(sys.modules, {"vllm": mock_vllm}):
+            await runner.load_model()
+            assert runner.is_loaded is True
+            mock_vllm.LLM.assert_called_once_with(
+                model=DEFAULT_VLLM_MODEL_ID,
+                gpu_memory_utilization=0.9,
+                tensor_parallel_size=1,
+                dtype="auto",
+                trust_remote_code=False,
+                seed=42,
+                enforce_eager=True,
+            )
+
 
 class TestVLLMValidatorMocked:
     """Unit tests for full scientific VLLMValidator with mock vLLM engine."""
@@ -569,6 +600,38 @@ class TestVLLMValidatorMocked:
             full_rep_text = format_vllm_full_report(report)
             assert "InferOpt Scientific vLLM Benchmark Report" in full_rep_text
             assert "PROVEN" in full_rep_text
+
+    @pytest.mark.asyncio
+    async def test_validator_enforce_eager_propagation(self) -> None:
+        mock_vllm = _setup_mock_vllm_module()
+        validator = VLLMValidator(
+            model_id=DEFAULT_VLLM_MODEL_ID,
+            enforce_eager=True,
+        )
+
+        with (
+            patch.dict(sys.modules, {"vllm": mock_vllm}),
+            tempfile.TemporaryDirectory() as tmp_dir,
+        ):
+            scenario = get_concurrent_4_workload(seed=42)
+            report = await validator.run_scientific_benchmark(
+                scenario=scenario,
+                concurrency_levels=(1,),
+                batch_sizes=(1, 2),
+                warmup_count=1,
+                repetitions=1,
+                output_dir=tmp_dir,
+            )
+
+            assert report.environment.enforce_eager is True
+            assert report.integrity.is_valid is True
+            # Verify LLM was initialized with enforce_eager=True
+            assert mock_vllm.LLM.call_args.kwargs.get("enforce_eager") is True
+
+            # Verify report JSON roundtrip with enforce_eager
+            json_str = report.to_json()
+            reloaded = VLLMExperimentReport.from_json(json_str)
+            assert reloaded.environment.enforce_eager is True
 
 
 class TestLiveVLLMBenchmark:

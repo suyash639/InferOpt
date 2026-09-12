@@ -115,6 +115,7 @@ class DirectVLLMRunner:
         model_id: str = DEFAULT_VLLM_MODEL_ID,
         default_temperature: float = 0.0,
         default_max_tokens: int = 128,
+        enforce_eager: bool = False,
         **kwargs: Any,
     ) -> None:
         """Initialize Direct vLLM runner.
@@ -124,15 +125,17 @@ class DirectVLLMRunner:
             model_id: Hugging Face model identifier (used if config is None).
             default_temperature: Sampling temperature (0.0 for greedy argmax).
             default_max_tokens: Default maximum tokens per request.
+            enforce_eager: Disable CUDA graphs and force eager execution (diagnostic mode).
             **kwargs: Extra parameters passed to VLLMConfig constructor.
         """
         if config is not None:
             self._config = config
-        elif kwargs or model_id != DEFAULT_VLLM_MODEL_ID:
+        elif kwargs or model_id != DEFAULT_VLLM_MODEL_ID or enforce_eager:
             cfg_kwargs: dict[str, Any] = {
                 "model": model_id,
                 "default_temperature": default_temperature,
                 "default_max_tokens": default_max_tokens,
+                "enforce_eager": enforce_eager,
             }
             cfg_kwargs.update(kwargs)
             self._config = VLLMConfig(**cfg_kwargs)
@@ -141,6 +144,7 @@ class DirectVLLMRunner:
                 model=model_id,
                 default_temperature=default_temperature,
                 default_max_tokens=default_max_tokens,
+                enforce_eager=enforce_eager,
             )
 
         self._llm: Any = None
@@ -197,6 +201,8 @@ class DirectVLLMRunner:
                     engine_kwargs["max_model_len"] = self._config.max_model_len
                 if self._config.seed is not None:
                     engine_kwargs["seed"] = self._config.seed
+                if self._config.enforce_eager:
+                    engine_kwargs["enforce_eager"] = True
                 engine_kwargs.update(self._config.extra_engine_args)
 
                 try:

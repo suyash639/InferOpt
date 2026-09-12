@@ -115,6 +115,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run Step 10 controlled Direct vLLM vs InferOpt scientific benchmark experiment.",
     )
     parser.add_argument(
+        "--enforce-eager",
+        action="store_true",
+        default=False,
+        help="Enforce eager execution mode in vLLM engine (disables CUDA graphs, diagnostic mode).",
+    )
+    parser.add_argument(
         "--audit",
         action="store_true",
         help="Run complete 6-condition scientific MLX audit across concurrency and batch levels.",
@@ -163,7 +169,10 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
         )
 
         model_id = args.model if args.model is not None else DEFAULT_VLLM_MODEL_ID
-        validator = VLLMValidator(model_id=model_id)
+        validator = VLLMValidator(
+            model_id=model_id,
+            enforce_eager=args.enforce_eager,
+        )
 
         scenario_name = args.scenario if args.scenario != "light" else "concurrent_4"
         scenario_factory = PRESET_SCENARIOS.get(scenario_name, PRESET_SCENARIOS["concurrent_4"])
@@ -206,6 +215,7 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
         print(f"  Scenario:      {scenario.scenario_name} ({req_info})")
         print(f"  Concurrency:   {concurrencies}")
         print(f"  Batch Sizes:   {batch_sizes}")
+        print(f"  Enforce Eager: {args.enforce_eager}")
         print(f"  Repetitions:   {repetitions} (Warmup: {warmup_count})")
         print(f"  Output Dir:    {out_dir}")
         print("=" * 80 + "\n")
@@ -415,9 +425,14 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
 
         backend = MLXBackend(model_id=args.model or DEFAULT_MLX_MODEL_ID)
     elif args.backend == "vllm":
-        from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID, VLLMBackend
+        from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID, VLLMBackend, VLLMConfig
 
-        backend = VLLMBackend(model=args.model or DEFAULT_VLLM_MODEL_ID)
+        backend = VLLMBackend(
+            config=VLLMConfig(
+                model=args.model or DEFAULT_VLLM_MODEL_ID,
+                enforce_eager=args.enforce_eager,
+            )
+        )
     else:
         backend = MockBackend(default_latency_sec=0.005)
 

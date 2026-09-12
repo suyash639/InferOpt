@@ -53,6 +53,15 @@ class VLLMConfig(BaseModel):
         default=42,
         description="Random seed for reproducible token sampling and KV cache initialization.",
     )
+    enforce_eager: bool = Field(
+        default=False,
+        description=(
+            "Whether to disable CUDA graph execution and force eager mode execution in vLLM. "
+            "Diagnostic and compatibility mode for environments where default vLLM V1 startup "
+            "encounters EngineCore socket initialization issues. Disables torch.compile and "
+            "CUDA graphs; results are not directly comparable to default compiled production runs."
+        ),
+    )
     default_temperature: float = Field(
         default=0.0,
         ge=0.0,
@@ -177,6 +186,8 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
                     engine_kwargs["max_model_len"] = self._config.max_model_len
                 if self._config.seed is not None:
                     engine_kwargs["seed"] = self._config.seed
+                if self._config.enforce_eager:
+                    engine_kwargs["enforce_eager"] = True
 
                 engine_kwargs.update(self._config.extra_engine_args)
 
@@ -466,6 +477,12 @@ def _cli_smoke_test() -> None:
         help="Trust remote code from HuggingFace",
     )
     parser.add_argument(
+        "--enforce-eager",
+        action="store_true",
+        default=False,
+        help="Enforce eager execution mode in vLLM (disables CUDA graphs, diagnostic mode)",
+    )
+    parser.add_argument(
         "--scheduler",
         action="store_true",
         help="Run end-to-end Scheduler dynamic batching smoke test (4 requests)",
@@ -500,6 +517,7 @@ def _cli_smoke_test() -> None:
         print(f"GPU Memory Utilization:  {args.gpu_memory_utilization}")
         print(f"Tensor Parallel Size:    {args.tensor_parallel_size}")
         print(f"Data Type:               {args.dtype}")
+        print(f"Enforce Eager:           {args.enforce_eager}")
         print(f"Scheduler Mode:          {args.scheduler}")
         print("-" * 60)
         print("Initializing vLLM engine...")
@@ -511,6 +529,7 @@ def _cli_smoke_test() -> None:
             tensor_parallel_size=args.tensor_parallel_size,
             dtype=args.dtype,
             trust_remote_code=args.trust_remote_code,
+            enforce_eager=args.enforce_eager,
             default_temperature=args.temperature,
             default_max_tokens=args.max_tokens,
         )

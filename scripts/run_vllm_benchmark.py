@@ -73,6 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Measured repetition trials per condition (default: 3)",
     )
     parser.add_argument(
+        "--enforce-eager",
+        action="store_true",
+        default=False,
+        help="Enforce eager execution mode in vLLM (disables CUDA graphs, diagnostic mode)",
+    )
+    parser.add_argument(
         "--output-dir",
         "-o",
         type=str,
@@ -100,11 +106,12 @@ async def run_benchmark(args: argparse.Namespace) -> int:
     print(f"  Concurrency:     {args.concurrency}")
     print(f"  Batch Sizes:     {args.batch_sizes}")
     print(f"  Batch Wait:      {args.batch_wait_ms} ms")
+    print(f"  Enforce Eager:   {args.enforce_eager}")
     print(f"  Repetitions:     {args.repetitions} (Warmup: {args.warmup})")
     print(f"  Output Dir:      {args.output_dir}")
     print("=" * 80 + "\n")
 
-    validator = VLLMValidator(model_id=args.model)
+    validator = VLLMValidator(model_id=args.model, enforce_eager=args.enforce_eager)
 
     try:
         report = await validator.run_scientific_benchmark(

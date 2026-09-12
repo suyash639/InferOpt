@@ -81,6 +81,10 @@ class VLLMEnvironmentMetadata(BaseModel):
     gpu_count: int = Field(default=0, ge=0, description="Count of visible GPU devices")
     inferopt_version: str = Field(default=INFEROPT_VERSION, description="InferOpt library version")
     model_id: str = Field(description="Evaluated model repository identifier")
+    enforce_eager: bool = Field(
+        default=False,
+        description="Whether eager execution mode was enabled (diagnostic mode).",
+    )
     warmup_count: int = Field(ge=0, description="Warmup iterations per run")
     repetitions: int = Field(ge=1, description="Number of measured repetition trials")
     workload_seed: int = Field(description="Deterministic workload seed")
@@ -291,6 +295,7 @@ def collect_vllm_environment_metadata(
     repetitions: int,
     workload_seed: int,
     workload_hash: str,
+    enforce_eager: bool = False,
 ) -> VLLMEnvironmentMetadata:
     """Inspect and capture local hardware, GPU, and Python runtime metadata."""
     vllm_ver = "unknown"
@@ -331,6 +336,7 @@ def collect_vllm_environment_metadata(
         gpu_count=gpu_count,
         inferopt_version=INFEROPT_VERSION,
         model_id=model_id,
+        enforce_eager=enforce_eager,
         warmup_count=warmup_count,
         repetitions=repetitions,
         workload_seed=workload_seed,
@@ -626,6 +632,10 @@ def format_vllm_full_report(report: VLLMExperimentReport) -> str:
         f"GPU Hardware:     {report.environment.gpu_name} (Count: {report.environment.gpu_count})",
         f"CUDA Version:     {report.environment.cuda_version}",
         f"vLLM Version:     {report.environment.vllm_version}",
+        (
+            f"Enforce Eager:    {report.environment.enforce_eager} "
+            f"(Diagnostic: {'YES' if report.environment.enforce_eager else 'NO'})"
+        ),
         "-" * 88,
     ]
 
@@ -675,6 +685,7 @@ class VLLMValidator:
         model_id: str = DEFAULT_VLLM_MODEL_ID,
         default_temperature: float = 0.0,
         default_max_tokens: int = 128,
+        enforce_eager: bool = False,
         **kwargs: Any,
     ) -> None:
         """Initialize vLLM validator with shared configuration parameters."""
@@ -685,6 +696,7 @@ class VLLMValidator:
                 "model": model_id,
                 "default_temperature": default_temperature,
                 "default_max_tokens": default_max_tokens,
+                "enforce_eager": enforce_eager,
             }
             cfg_kwargs.update(kwargs)
             self._config = VLLMConfig(**cfg_kwargs)
@@ -976,6 +988,7 @@ class VLLMValidator:
             repetitions=repetitions,
             workload_seed=scenario.config.seed,
             workload_hash=workload_hash,
+            enforce_eager=self._config.enforce_eager,
         )
 
         condition_results: list[VLLMConditionResult] = []

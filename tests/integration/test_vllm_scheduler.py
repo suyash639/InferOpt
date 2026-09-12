@@ -128,6 +128,35 @@ class TestVLLMSchedulerSingleRequest:
                 assert snapshot.requests.completed_requests == 1
                 assert snapshot.requests.failed_requests == 0
 
+    @pytest.mark.asyncio
+    async def test_single_request_eager_diagnostic_mode(self) -> None:
+        """Verify pipeline execution with enforce_eager diagnostic mode enabled."""
+        mock_vllm, _ = _setup_mock_vllm_engine()
+        config = VLLMConfig(model=DEFAULT_VLLM_MODEL_ID, enforce_eager=True)
+        backend = VLLMBackend(config=config)
+        collector = MetricsCollector()
+        scheduler_config = SchedulerConfig(
+            max_concurrency=2,
+            batch_config=BatchConfig(max_batch_size=4, batch_wait_ms=0.0),
+        )
+
+        with patch.dict(sys.modules, {"vllm": mock_vllm}):
+            async with Scheduler(
+                backend=backend, config=scheduler_config, collector=collector
+            ) as scheduler:
+                req = InferenceRequest(
+                    request_id="vllm-e2e-eager-1",
+                    model=DEFAULT_VLLM_MODEL_ID,
+                    prompt="Testing eager diagnostic mode.",
+                    max_tokens=32,
+                    temperature=0.0,
+                )
+
+                response = await scheduler.submit(req)
+                assert response.request_id == "vllm-e2e-eager-1"
+                assert response.output_tokens == 8
+                assert mock_vllm.LLM.call_args.kwargs.get("enforce_eager") is True
+
 
 class TestVLLMSchedulerDynamicBatching:
     """Integration tests validating dynamic batch formation and request coalescing."""

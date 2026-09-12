@@ -647,7 +647,7 @@ InferOpt provides a scientifically controlled benchmark harness to evaluate serv
 * **Differential Overhead**: Formally calculates the end-to-end differential overhead relative to Direct vLLM.
 
 ```bash
-# Run full 5-condition scientific benchmark on NVIDIA GPU
+# Run full 5-condition scientific benchmark on NVIDIA GPU (Default CUDA graph mode)
 python -m inferopt.benchmarks.cli --validate-vllm \
     --concurrency 1 4 8 16 \
     --batch-sizes 1 2 4 8 \
@@ -656,7 +656,19 @@ python -m inferopt.benchmarks.cli --validate-vllm \
 
 # Or run via standalone script
 python scripts/run_vllm_benchmark.py --concurrency 1 4 8 16 --batch-sizes 1 2 4 8
+
+# Diagnostic Mode: Enforce eager execution (disables CUDA graphs)
+# Used for environments encountering vLLM V1 EngineCore socket initialization issues
+python -m inferopt.benchmarks.cli --validate-vllm --enforce-eager
 ```
+
+> [!IMPORTANT]
+> **Diagnostic Mode (`--enforce-eager`) & Benchmark Comparability**:
+>
+> 1. **Diagnostic & Compatibility Purpose**: `--enforce-eager` is provided as an opt-in diagnostic and compatibility option for environments (such as containerized or virtualized GPU platforms like Kaggle) where default vLLM V1 engine initialization encounters IPC/socket startup failures (specifically `ValueError: b'\x00\x00' is not a valid EngineCoreRequestType` in `process_input_sockets()`).
+> 2. **Not a Root Cause Fix**: Enabling eager execution bypasses CUDA graph capture and compilation, providing a working diagnostic inference path. It does *not* fix the underlying vLLM V1 EngineCore socket/IPC issue.
+> 3. **Comparability Warning**: Eager execution disables `torch.compile` and CUDA graph execution, incurring per-request Python/CUDA kernel launch overhead. Therefore, results collected with `--enforce-eager` **MUST NOT** be presented as directly comparable to standard production or default vLLM performance runs.
+> 4. **Production Default**: The default configuration remains `enforce_eager=False` to preserve full CUDA graph capture, compilation, and standard production serving semantics.
 
 Results are persisted as structured JSON in `benchmarks/results/vllm/`.
 

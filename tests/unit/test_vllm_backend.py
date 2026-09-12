@@ -53,6 +53,7 @@ class TestVLLMConfig:
         assert config.dtype == "auto"
         assert config.trust_remote_code is False
         assert config.seed == 42
+        assert config.enforce_eager is False
         assert config.default_temperature == 0.0
         assert config.default_max_tokens == 128
         assert config.extra_engine_args == {}
@@ -67,9 +68,10 @@ class TestVLLMConfig:
             dtype="float16",
             trust_remote_code=True,
             seed=123,
+            enforce_eager=True,
             default_temperature=0.5,
             default_max_tokens=256,
-            extra_engine_args={"enforce_eager": True},
+            extra_engine_args={"gpu_memory_utilization": 0.8},
             extra_sampling_args={"top_p": 0.95},
         )
         assert config.model == "meta-llama/Llama-3.2-1B-Instruct"
@@ -79,9 +81,10 @@ class TestVLLMConfig:
         assert config.dtype == "float16"
         assert config.trust_remote_code is True
         assert config.seed == 123
+        assert config.enforce_eager is True
         assert config.default_temperature == 0.5
         assert config.default_max_tokens == 256
-        assert config.extra_engine_args == {"enforce_eager": True}
+        assert config.extra_engine_args == {"gpu_memory_utilization": 0.8}
         assert config.extra_sampling_args == {"top_p": 0.95}
 
     def test_invalid_gpu_memory_utilization(self) -> None:
@@ -198,6 +201,34 @@ class TestVLLMBackendInitializationAndLifecycle:
             await backend.unload_model()
             assert backend.is_loaded is False
             assert backend.model_load_time_ms == 0.0
+
+    @pytest.mark.asyncio
+    async def test_enforce_eager_mode_propagation(self) -> None:
+        mock_llm_cls = MagicMock()
+        mock_llm_cls.return_value = MagicMock()
+
+        mock_vllm = MagicMock()
+        mock_vllm.LLM = mock_llm_cls
+
+        config_eager = VLLMConfig(
+            model="Qwen/Qwen2.5-0.5B-Instruct",
+            dtype="float16",
+            enforce_eager=True,
+        )
+        backend = VLLMBackend(config=config_eager)
+
+        with patch.dict(sys.modules, {"vllm": mock_vllm}):
+            await backend.load_model()
+            assert backend.is_loaded is True
+            mock_llm_cls.assert_called_once_with(
+                model="Qwen/Qwen2.5-0.5B-Instruct",
+                gpu_memory_utilization=0.9,
+                tensor_parallel_size=1,
+                dtype="float16",
+                trust_remote_code=False,
+                seed=42,
+                enforce_eager=True,
+            )
 
     @pytest.mark.asyncio
     async def test_initialization_failure_raises_backend_error(self) -> None:
