@@ -83,6 +83,74 @@ class VLLMConfig(BaseModel):
     )
 
 
+def cleanup_vllm_engine(llm: Any | None) -> None:
+    """Explicitly and deterministically shutdown a vLLM engine instance and release GPU resources.
+
+    Invokes engine shutdown hooks (across vLLM V0 / V1 structures), tears down
+    distributed process environments, cleans up cyclic garbage references,
+    synchronizes CUDA streams, flushes CUDA caching allocators, and frees IPC handles.
+    """
+    if llm is None:
+        return
+
+    import contextlib
+    import gc
+    import sys
+
+    # 1. Invoke engine shutdown hooks if available (vLLM V0 / V1)
+    for obj in (
+        llm,
+        getattr(llm, "engine_client", None),
+        getattr(llm, "engine", None),
+        getattr(llm, "llm_engine", None),
+        getattr(getattr(llm, "llm_engine", None), "model_executor", None),
+        getattr(getattr(llm, "engine", None), "model_executor", None),
+    ):
+        if obj is not None:
+            shutdown_fn = getattr(obj, "shutdown", None) or getattr(obj, "close", None)
+            if callable(shutdown_fn):
+                with contextlib.suppress(Exception):
+                    shutdown_fn()
+
+    # 2. Teardown vLLM distributed environment if initialized
+    if "vllm.distributed.parallel_state" in sys.modules:
+        try:
+            from vllm.distributed.parallel_state import (  # type: ignore[import-not-found]
+                destroy_distributed_environment,
+                destroy_model_parallel,
+            )
+
+            destroy_model_parallel()
+            destroy_distributed_environment()
+        except Exception:
+            pass
+
+    # 3. Teardown PyTorch distributed process group if initialized
+    try:
+        import torch.distributed as dist  # type: ignore[import-not-found]
+
+        if dist.is_initialized():
+            dist.destroy_process_group()
+    except Exception:
+        pass
+
+    # 4. Explicitly delete reference and run garbage collection
+    del llm
+    gc.collect()
+
+    # 5. Synchronize CUDA streams, empty cache, and collect IPC handles
+    try:
+        import torch
+
+        if hasattr(torch, "cuda") and torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            if hasattr(torch.cuda, "ipc_collect"):
+                torch.cuda.ipc_collect()
+    except Exception:
+        pass
+
+
 class VLLMBackend(InferenceBackend, BatchInferenceBackend):
     """Production-quality backend executing inference via the vLLM engine.
 
@@ -203,21 +271,17 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
             self._llm, self._model_load_time_ms = await asyncio.to_thread(_load_sync)
 
     async def unload_model(self) -> None:
-        """Safely release the initialized vLLM engine from memory."""
+        """Safely and deterministically release the initialized vLLM engine from GPU memory."""
         async with self._lock:
+            if self._llm is None:
+                self._model_load_time_ms = 0.0
+                return
+
+            llm_to_clean = self._llm
             self._llm = None
             self._model_load_time_ms = 0.0
 
-            def _cleanup_sync() -> None:
-                try:
-                    import torch  # type: ignore[import-not-found]
-
-                    if hasattr(torch, "cuda") and torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                except ImportError:
-                    pass
-
-            await asyncio.to_thread(_cleanup_sync)
+            await asyncio.to_thread(cleanup_vllm_engine, llm_to_clean)
 
     def _build_sampling_params(
         self,
@@ -535,106 +599,115 @@ def _cli_smoke_test() -> None:
         )
 
         backend = VLLMBackend(config=config)
-        t_load_start = time.perf_counter()
-        await backend.load_model()
-        t_load_ms = (time.perf_counter() - t_load_start) * 1000.0
-        print(f"vLLM engine loaded successfully in {t_load_ms:.2f}ms.")
+        try:
+            t_load_start = time.perf_counter()
+            await backend.load_model()
+            t_load_ms = (time.perf_counter() - t_load_start) * 1000.0
+            print(f"vLLM engine loaded successfully in {t_load_ms:.2f}ms.")
 
-        if args.scheduler:
-            # End-to-end scheduler dynamic batching smoke test
-            from inferopt.scheduler.config import BatchConfig, SchedulerConfig
-            from inferopt.scheduler.scheduler import Scheduler
-            from inferopt.telemetry.collector import MetricsCollector
+            if args.scheduler:
+                # End-to-end scheduler dynamic batching smoke test
+                from inferopt.scheduler.config import BatchConfig, SchedulerConfig
+                from inferopt.scheduler.scheduler import Scheduler
+                from inferopt.telemetry.collector import MetricsCollector
 
-            scheduler_config = SchedulerConfig(
-                max_concurrency=args.concurrency,
-                batch_config=BatchConfig(
-                    max_batch_size=args.batch_size,
-                    batch_wait_ms=args.batch_wait_ms,
-                ),
-            )
-            collector = MetricsCollector()
+                scheduler_config = SchedulerConfig(
+                    max_concurrency=args.concurrency,
+                    batch_config=BatchConfig(
+                        max_batch_size=args.batch_size,
+                        batch_wait_ms=args.batch_wait_ms,
+                    ),
+                )
+                collector = MetricsCollector()
 
-            prompts = [
-                "Explain what InferOpt does in one sentence.",
-                "What are the benefits of dynamic batching in LLM serving?",
-                "How does speculative decoding improve inference throughput?",
-                "Describe the role of key-value cache in transformer generation.",
-            ]
-            requests = [
-                InferenceRequest(
-                    request_id=f"vllm-e2e-smoke-{i + 1}",
+                prompts = [
+                    "Explain what InferOpt does in one sentence.",
+                    "What are the benefits of dynamic batching in LLM serving?",
+                    "How does speculative decoding improve inference throughput?",
+                    "Describe the role of key-value cache in transformer generation.",
+                ]
+                requests = [
+                    InferenceRequest(
+                        request_id=f"vllm-e2e-smoke-{i + 1}",
+                        model=args.model,
+                        prompt=prompt,
+                        max_tokens=args.max_tokens,
+                        temperature=args.temperature,
+                    )
+                    for i, prompt in enumerate(prompts)
+                ]
+
+                print("-" * 60)
+                print(
+                    f"Submitting {len(requests)} requests through Scheduler + Dynamic Batching..."
+                )
+                t_start = time.perf_counter()
+
+                async with Scheduler(
+                    backend=backend,
+                    config=scheduler_config,
+                    collector=collector,
+                ) as scheduler:
+                    responses = await asyncio.gather(*[scheduler.submit(r) for r in requests])
+
+                t_total_sec = max(0.0001, time.perf_counter() - t_start)
+                snapshot = collector.snapshot()
+                req_stats = snapshot.requests
+                batch_stats = snapshot.batches
+
+                print("\nInferOpt VLLM E2E Smoke Test")
+                print("----------------------------")
+                print(f"Backend: {backend.__class__.__name__}")
+                print(f"Requests: {req_stats.total_requests}")
+                print(f"Completed: {req_stats.completed_requests}")
+                print(f"Failed: {req_stats.failed_requests}")
+                print(f"Batches: {batch_stats.total_batches}")
+                print(f"Average batch size: {batch_stats.avg_batch_size:.1f}")
+                print(f"p50 latency: {req_stats.p50_total_latency_ms:.2f} ms")
+                print(f"p95 latency: {req_stats.p95_total_latency_ms:.2f} ms")
+                throughput = req_stats.completed_requests / t_total_sec
+                print(f"Throughput: {throughput:.2f} req/s")
+                print("=" * 60)
+
+                for resp in responses:
+                    print(
+                        f"[{resp.request_id}] (tokens: in={resp.input_tokens}, "
+                        f"out={resp.output_tokens}, lat={resp.latency_ms:.1f}ms):"
+                    )
+                    print(f"  {resp.generated_text.strip()[:120]}...\n")
+            else:
+                req = InferenceRequest(
+                    request_id="vllm-smoke-1",
                     model=args.model,
-                    prompt=prompt,
+                    prompt=args.prompt,
                     max_tokens=args.max_tokens,
                     temperature=args.temperature,
                 )
-                for i, prompt in enumerate(prompts)
-            ]
 
-            print("-" * 60)
-            print(f"Submitting {len(requests)} requests through Scheduler + Dynamic Batching...")
-            t_start = time.perf_counter()
+                print("-" * 60)
+                print("Executing inference generation...")
+                t_gen_start = time.perf_counter()
+                response = await backend.generate(req)
+                t_total_ms = (time.perf_counter() - t_gen_start) * 1000.0
 
-            async with Scheduler(
-                backend=backend,
-                config=scheduler_config,
-                collector=collector,
-            ) as scheduler:
-                responses = await asyncio.gather(*[scheduler.submit(r) for r in requests])
-
-            t_total_sec = max(0.0001, time.perf_counter() - t_start)
-            snapshot = collector.snapshot()
-            req_stats = snapshot.requests
-            batch_stats = snapshot.batches
-
-            print("\nInferOpt VLLM E2E Smoke Test")
-            print("----------------------------")
-            print(f"Backend: {backend.__class__.__name__}")
-            print(f"Requests: {req_stats.total_requests}")
-            print(f"Completed: {req_stats.completed_requests}")
-            print(f"Failed: {req_stats.failed_requests}")
-            print(f"Batches: {batch_stats.total_batches}")
-            print(f"Average batch size: {batch_stats.avg_batch_size:.1f}")
-            print(f"p50 latency: {req_stats.p50_total_latency_ms:.2f} ms")
-            print(f"p95 latency: {req_stats.p95_total_latency_ms:.2f} ms")
-            throughput = req_stats.completed_requests / t_total_sec
-            print(f"Throughput: {throughput:.2f} req/s")
-            print("=" * 60)
-
-            for resp in responses:
-                print(
-                    f"[{resp.request_id}] (tokens: in={resp.input_tokens}, "
-                    f"out={resp.output_tokens}, lat={resp.latency_ms:.1f}ms):"
+                out_tokens = response.output_tokens or 0
+                tps = (
+                    (out_tokens / (response.latency_ms / 1000.0))
+                    if response.latency_ms > 0
+                    else 0.0
                 )
-                print(f"  {resp.generated_text.strip()[:120]}...\n")
-        else:
-            req = InferenceRequest(
-                request_id="vllm-smoke-1",
-                model=args.model,
-                prompt=args.prompt,
-                max_tokens=args.max_tokens,
-                temperature=args.temperature,
-            )
 
-            print("-" * 60)
-            print("Executing inference generation...")
-            t_gen_start = time.perf_counter()
-            response = await backend.generate(req)
-            t_total_ms = (time.perf_counter() - t_gen_start) * 1000.0
-
-            out_tokens = response.output_tokens or 0
-            tps = (out_tokens / (response.latency_ms / 1000.0)) if response.latency_ms > 0 else 0.0
-
-            print("-" * 60)
-            print(f"Generated Output:\n{response.generated_text}")
-            print("-" * 60)
-            print(f"Input Tokens:      {response.input_tokens}")
-            print(f"Output Tokens:     {response.output_tokens}")
-            print(f"Backend Latency:   {response.latency_ms:.2f}ms")
-            print(f"Total Turnaround:  {t_total_ms:.2f}ms")
-            print(f"Output Throughput: {tps:.2f} tokens/sec")
-            print("=" * 60)
+                print("-" * 60)
+                print(f"Generated Output:\n{response.generated_text}")
+                print("-" * 60)
+                print(f"Input Tokens:      {response.input_tokens}")
+                print(f"Output Tokens:     {response.output_tokens}")
+                print(f"Backend Latency:   {response.latency_ms:.2f}ms")
+                print(f"Total Turnaround:  {t_total_ms:.2f}ms")
+                print(f"Output Throughput: {tps:.2f} tokens/sec")
+                print("=" * 60)
+        finally:
+            await backend.unload_model()
 
     asyncio.run(_run())
 

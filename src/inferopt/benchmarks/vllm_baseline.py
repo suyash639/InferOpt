@@ -13,7 +13,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID, VLLMConfig
+from inferopt.backends.vllm import (
+    DEFAULT_VLLM_MODEL_ID,
+    VLLMConfig,
+    cleanup_vllm_engine,
+)
 from inferopt.benchmarks.models import WorkloadRequestSpec, WorkloadScenario
 from inferopt.core.exceptions import BackendError
 from inferopt.telemetry.collector import _compute_percentile
@@ -217,21 +221,17 @@ class DirectVLLMRunner:
             self._llm, self._model_load_time_ms = await asyncio.to_thread(_load_sync)
 
     async def unload_model(self) -> None:
-        """Safely release the initialized vLLM engine."""
+        """Safely and deterministically release the initialized vLLM engine from GPU memory."""
         async with self._lock:
+            if self._llm is None:
+                self._model_load_time_ms = 0.0
+                return
+
+            llm_to_clean = self._llm
             self._llm = None
             self._model_load_time_ms = 0.0
 
-            def _cleanup_sync() -> None:
-                try:
-                    import torch  # type: ignore[import-not-found]
-
-                    if hasattr(torch, "cuda") and torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                except ImportError:
-                    pass
-
-            await asyncio.to_thread(_cleanup_sync)
+            await asyncio.to_thread(cleanup_vllm_engine, llm_to_clean)
 
     def _build_sampling_params(self, temperature: float, max_tokens: int) -> Any:
         """Construct a vLLM SamplingParams object."""

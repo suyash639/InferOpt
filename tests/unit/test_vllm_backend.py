@@ -10,7 +10,12 @@ import pytest
 from pydantic import ValidationError
 
 from inferopt.backends.base import BatchInferenceBackend, InferenceBackend
-from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID, VLLMBackend, VLLMConfig
+from inferopt.backends.vllm import (
+    DEFAULT_VLLM_MODEL_ID,
+    VLLMBackend,
+    VLLMConfig,
+    cleanup_vllm_engine,
+)
 from inferopt.core.exceptions import BackendError, InferenceError
 from inferopt.core.models import InferenceBatch, InferenceRequest
 from inferopt.scheduler.config import BatchConfig, SchedulerConfig
@@ -242,6 +247,70 @@ class TestVLLMBackendInitializationAndLifecycle:
                 await backend.load_model()
             assert "Failed to initialize vLLM engine" in str(exc_info.value)
             assert "CUDA out of memory" in str(exc_info.value)
+
+    def test_cleanup_vllm_engine_safe_on_none(self) -> None:
+        """Verify cleanup_vllm_engine handles None gracefully without errors."""
+        cleanup_vllm_engine(None)
+
+    def test_cleanup_vllm_engine_invokes_hooks_and_cuda_cleanup(self) -> None:
+        """Verify cleanup_vllm_engine calls shutdown on hooks and flushes CUDA cache."""
+        mock_llm = MagicMock()
+        mock_llm.engine_client = MagicMock()
+        mock_llm.llm_engine = MagicMock()
+        mock_llm.llm_engine.model_executor = MagicMock()
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+
+        with patch.dict(sys.modules, {"torch": mock_torch}):
+            cleanup_vllm_engine(mock_llm)
+
+            mock_llm.shutdown.assert_called_once()
+            mock_llm.engine_client.shutdown.assert_called_once()
+            mock_llm.llm_engine.model_executor.shutdown.assert_called_once()
+            mock_torch.cuda.synchronize.assert_called_once()
+            mock_torch.cuda.empty_cache.assert_called_once()
+
+    def test_cleanup_vllm_engine_handles_distributed_teardown(self) -> None:
+        """Verify cleanup_vllm_engine tears down parallel_state and torch.distributed."""
+        mock_llm = MagicMock()
+        mock_parallel_state = MagicMock()
+        mock_dist = MagicMock()
+        mock_dist.is_initialized.return_value = True
+        mock_torch = MagicMock()
+        mock_torch.distributed = mock_dist
+
+        with patch.dict(
+            sys.modules,
+            {
+                "vllm.distributed.parallel_state": mock_parallel_state,
+                "torch": mock_torch,
+                "torch.distributed": mock_dist,
+            },
+        ):
+            cleanup_vllm_engine(mock_llm)
+
+            mock_parallel_state.destroy_model_parallel.assert_called_once()
+            mock_parallel_state.destroy_distributed_environment.assert_called_once()
+            mock_dist.destroy_process_group.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_unload_model_invokes_cleanup_vllm_engine(self) -> None:
+        """Verify unload_model delegates to cleanup_vllm_engine and clears state."""
+        mock_llm = MagicMock()
+        mock_vllm = MagicMock()
+        mock_vllm.LLM.return_value = mock_llm
+
+        backend = VLLMBackend()
+        with patch.dict(sys.modules, {"vllm": mock_vllm}):
+            await backend.load_model()
+            assert backend.is_loaded is True
+
+            with patch("inferopt.backends.vllm.cleanup_vllm_engine") as mock_cleanup:
+                await backend.unload_model()
+                assert backend.is_loaded is False
+                assert backend.model_load_time_ms == 0.0
+                mock_cleanup.assert_called_once_with(mock_llm)
 
 
 class TestVLLMBackendSingleGeneration:

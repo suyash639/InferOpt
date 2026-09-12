@@ -699,29 +699,17 @@ class VLLMValidator:
                 "enforce_eager": enforce_eager,
             }
             cfg_kwargs.update(kwargs)
-            self._config = VLLMConfig(**cfg_kwargs)
-
-        self._direct_runner: DirectVLLMRunner | None = None
-        self._inferopt_backend: VLLMBackend | None = None
+        self._config = VLLMConfig(**cfg_kwargs) if config is None else config
 
     @property
     def model_id(self) -> str:
         """Configured model identifier."""
         return self._config.model
 
-    async def _get_direct_runner(self) -> DirectVLLMRunner:
-        """Get or initialize DirectVLLMRunner."""
-        if self._direct_runner is None:
-            self._direct_runner = DirectVLLMRunner(config=self._config)
-            await self._direct_runner.load_model()
-        return self._direct_runner
-
-    async def _get_inferopt_backend(self) -> VLLMBackend:
-        """Get or initialize VLLMBackend."""
-        if self._inferopt_backend is None:
-            self._inferopt_backend = VLLMBackend(config=self._config)
-            await self._inferopt_backend.load_model()
-        return self._inferopt_backend
+    @property
+    def config(self) -> VLLMConfig:
+        """Configured vLLM parameters."""
+        return self._config
 
     async def run_condition_direct(
         self,
@@ -730,108 +718,124 @@ class VLLMValidator:
         warmup_count: int = 2,
         repetitions: int = 3,
     ) -> VLLMConditionResult:
-        """Execute Condition A: Direct vLLM baseline across repetitions."""
-        runner = await self._get_direct_runner()
-        rep_results: list[DirectVLLMResult] = []
+        """Execute Condition A: Direct vLLM baseline across repetitions.
 
-        for rep_idx in range(repetitions):
-            # Only warmup on the first repetition trial
-            w_count = warmup_count if rep_idx == 0 else 0
-            res = await runner.run(
-                scenario=scenario,
-                warmup_count=w_count,
+        Lifecycle:
+        1. Initialize DirectVLLMRunner and load dedicated vLLM engine.
+        2. Execute warmup iterations.
+        3. Execute timed benchmark repetitions.
+        4. Aggregate statistical distributions.
+        5. Explicitly shutdown and unload the engine before returning to ensure zero GPU leakage.
+        """
+        runner = DirectVLLMRunner(config=self._config)
+        try:
+            await runner.load_model()
+            rep_results: list[DirectVLLMResult] = []
+
+            for rep_idx in range(repetitions):
+                # Only warmup on the first repetition trial
+                w_count = warmup_count if rep_idx == 0 else 0
+                res = await runner.run(
+                    scenario=scenario,
+                    warmup_count=w_count,
+                    concurrency=concurrency,
+                )
+                rep_results.append(res)
+
+            # Aggregate metrics across repetitions
+            durations = [r.duration_sec for r in rep_results]
+            rpss = [r.requests_per_sec for r in rep_results]
+            tok_pss = [r.output_tokens_per_sec for r in rep_results]
+            mean_lats = [r.avg_latency_ms for r in rep_results]
+
+            # Pool all individual request latencies from all repetitions
+            all_lats: list[float] = []
+            for r in rep_results:
+                all_lats.extend([req.latency_ms for req in r.request_results if req.success])
+
+            avg_dur = sum(durations) / len(durations) if durations else 0.0
+            avg_rps = sum(rpss) / len(rpss) if rpss else 0.0
+            avg_tok_ps = sum(tok_pss) / len(tok_pss) if tok_pss else 0.0
+            avg_mean_lat = sum(mean_lats) / len(mean_lats) if mean_lats else 0.0
+
+            p50_lat = calculate_percentile(all_lats, 50.0) if all_lats else 0.0
+            p95_lat = calculate_percentile(all_lats, 95.0) if all_lats else 0.0
+            p99_lat = calculate_percentile(all_lats, 99.0) if all_lats else 0.0
+            min_lat = min(all_lats, default=0.0)
+            max_lat = max(all_lats, default=0.0)
+            std_dev_lat = compute_std_dev(all_lats, avg_mean_lat) if len(all_lats) > 1 else 0.0
+
+            # Extract tokens from final repetition
+            final_rep = rep_results[-1]
+            req_records = tuple(
+                VLLMBenchmarkRequestRecord(
+                    request_id=r.request_id,
+                    prompt_hash=r.prompt_hash,
+                    output_hash=r.output_hash,
+                    input_tokens=r.input_tokens,
+                    output_tokens=r.output_tokens,
+                    latency_ms=r.latency_ms,
+                    success=r.success,
+                )
+                for r in final_rep.request_results
+            )
+
+            total_in = sum(r.input_tokens for r in final_rep.request_results if r.success)
+            total_out = sum(r.output_tokens for r in final_rep.request_results if r.success)
+            comp_count = sum(1 for r in final_rep.request_results if r.success)
+
+            return VLLMConditionResult(
+                condition=VLLMCondition.DIRECT_VLLM,
+                condition_label=VLLM_CONDITION_LABELS[VLLMCondition.DIRECT_VLLM],
                 concurrency=concurrency,
+                max_batch_size=1,
+                total_requests=len(scenario.requests),
+                completed_requests=comp_count,
+                failed_requests=len(scenario.requests) - comp_count,
+                duration_sec=avg_dur,
+                requests_per_sec=avg_rps,
+                output_tokens_per_sec=avg_tok_ps,
+                total_tokens_per_sec=(total_in + total_out) / avg_dur if avg_dur > 0 else 0.0,
+                mean_latency_ms=avg_mean_lat,
+                median_latency_ms=p50_lat,
+                p50_latency_ms=p50_lat,
+                p95_latency_ms=p95_lat,
+                p99_latency_ms=p99_lat,
+                min_latency_ms=min_lat,
+                max_latency_ms=max_lat,
+                std_dev_latency_ms=std_dev_lat,
+                avg_queue_wait_ms=0.0,
+                p50_queue_wait_ms=0.0,
+                p95_queue_wait_ms=0.0,
+                p99_queue_wait_ms=0.0,
+                avg_backend_execution_ms=avg_mean_lat,
+                p50_backend_execution_ms=p50_lat,
+                p95_backend_execution_ms=p95_lat,
+                p99_backend_execution_ms=p99_lat,
+                total_input_tokens=total_in,
+                total_output_tokens=total_out,
+                total_tokens=total_in + total_out,
+                avg_input_tokens_per_req=(total_in / comp_count) if comp_count > 0 else 0.0,
+                avg_output_tokens_per_req=(total_out / comp_count) if comp_count > 0 else 0.0,
+                min_output_tokens=min(
+                    [r.output_tokens for r in final_rep.request_results], default=0
+                ),
+                max_output_tokens=max(
+                    [r.output_tokens for r in final_rep.request_results], default=0
+                ),
+                total_batches=comp_count,
+                avg_batch_size=1.0,
+                median_batch_size=1.0,
+                min_batch_size=1,
+                max_batch_size_formed=1,
+                batch_size_distribution={1: comp_count},
+                avg_batch_formation_wait_ms=0.0,
+                avg_batch_execution_ms=avg_mean_lat,
+                repetition_count=repetitions,
+                requests=req_records,
             )
-            rep_results.append(res)
-
-        # Aggregate metrics across repetitions
-        durations = [r.duration_sec for r in rep_results]
-        rpss = [r.requests_per_sec for r in rep_results]
-        tok_pss = [r.output_tokens_per_sec for r in rep_results]
-        mean_lats = [r.avg_latency_ms for r in rep_results]
-
-        # Pool all individual request latencies from all repetitions
-        all_lats: list[float] = []
-        for r in rep_results:
-            all_lats.extend([req.latency_ms for req in r.request_results if req.success])
-
-        avg_dur = sum(durations) / len(durations) if durations else 0.0
-        avg_rps = sum(rpss) / len(rpss) if rpss else 0.0
-        avg_tok_ps = sum(tok_pss) / len(tok_pss) if tok_pss else 0.0
-        avg_mean_lat = sum(mean_lats) / len(mean_lats) if mean_lats else 0.0
-
-        p50_lat = calculate_percentile(all_lats, 50.0) if all_lats else 0.0
-        p95_lat = calculate_percentile(all_lats, 95.0) if all_lats else 0.0
-        p99_lat = calculate_percentile(all_lats, 99.0) if all_lats else 0.0
-        min_lat = min(all_lats, default=0.0)
-        max_lat = max(all_lats, default=0.0)
-        std_dev_lat = compute_std_dev(all_lats, avg_mean_lat) if len(all_lats) > 1 else 0.0
-
-        # Extract tokens from final repetition
-        final_rep = rep_results[-1]
-        req_records = tuple(
-            VLLMBenchmarkRequestRecord(
-                request_id=r.request_id,
-                prompt_hash=r.prompt_hash,
-                output_hash=r.output_hash,
-                input_tokens=r.input_tokens,
-                output_tokens=r.output_tokens,
-                latency_ms=r.latency_ms,
-                success=r.success,
-            )
-            for r in final_rep.request_results
-        )
-
-        total_in = sum(r.input_tokens for r in final_rep.request_results if r.success)
-        total_out = sum(r.output_tokens for r in final_rep.request_results if r.success)
-        comp_count = sum(1 for r in final_rep.request_results if r.success)
-
-        return VLLMConditionResult(
-            condition=VLLMCondition.DIRECT_VLLM,
-            condition_label=VLLM_CONDITION_LABELS[VLLMCondition.DIRECT_VLLM],
-            concurrency=concurrency,
-            max_batch_size=1,
-            total_requests=len(scenario.requests),
-            completed_requests=comp_count,
-            failed_requests=len(scenario.requests) - comp_count,
-            duration_sec=avg_dur,
-            requests_per_sec=avg_rps,
-            output_tokens_per_sec=avg_tok_ps,
-            total_tokens_per_sec=(total_in + total_out) / avg_dur if avg_dur > 0 else 0.0,
-            mean_latency_ms=avg_mean_lat,
-            median_latency_ms=p50_lat,
-            p50_latency_ms=p50_lat,
-            p95_latency_ms=p95_lat,
-            p99_latency_ms=p99_lat,
-            min_latency_ms=min_lat,
-            max_latency_ms=max_lat,
-            std_dev_latency_ms=std_dev_lat,
-            avg_queue_wait_ms=0.0,
-            p50_queue_wait_ms=0.0,
-            p95_queue_wait_ms=0.0,
-            p99_queue_wait_ms=0.0,
-            avg_backend_execution_ms=avg_mean_lat,
-            p50_backend_execution_ms=p50_lat,
-            p95_backend_execution_ms=p95_lat,
-            p99_backend_execution_ms=p99_lat,
-            total_input_tokens=total_in,
-            total_output_tokens=total_out,
-            total_tokens=total_in + total_out,
-            avg_input_tokens_per_req=(total_in / comp_count) if comp_count > 0 else 0.0,
-            avg_output_tokens_per_req=(total_out / comp_count) if comp_count > 0 else 0.0,
-            min_output_tokens=min([r.output_tokens for r in final_rep.request_results], default=0),
-            max_output_tokens=max([r.output_tokens for r in final_rep.request_results], default=0),
-            total_batches=comp_count,
-            avg_batch_size=1.0,
-            median_batch_size=1.0,
-            min_batch_size=1,
-            max_batch_size_formed=1,
-            batch_size_distribution={1: comp_count},
-            avg_batch_formation_wait_ms=0.0,
-            avg_batch_execution_ms=avg_mean_lat,
-            repetition_count=repetitions,
-            requests=req_records,
-        )
+        finally:
+            await runner.unload_model()
 
     async def run_condition_inferopt(
         self,
@@ -843,126 +847,138 @@ class VLLMValidator:
         repetitions: int = 3,
         batch_wait_ms: float = 50.0,
     ) -> VLLMConditionResult:
-        """Execute an InferOpt condition (Batch 1, 2, 4, 8) across repetitions."""
-        backend = await self._get_inferopt_backend()
-        runner = BenchmarkRunner()
+        """Execute an InferOpt condition (Batch 1, 2, 4, 8) across repetitions.
 
-        scheduler_config = SchedulerConfig(
-            max_concurrency=concurrency,
-            batch_config=BatchConfig(
+        Lifecycle:
+        1. Initialize VLLMBackend and load dedicated vLLM engine.
+        2. Execute warmup iterations.
+        3. Execute timed benchmark repetitions through Scheduler and dynamic batching.
+        4. Aggregate statistical distributions.
+        5. Explicitly shutdown and unload the engine before returning to ensure zero GPU leakage.
+        """
+        backend = VLLMBackend(config=self._config)
+        try:
+            await backend.load_model()
+            runner = BenchmarkRunner()
+
+            scheduler_config = SchedulerConfig(
+                max_concurrency=concurrency,
+                batch_config=BatchConfig(
+                    max_batch_size=max_batch_size,
+                    batch_wait_ms=batch_wait_ms,
+                ),
+            )
+
+            # Warmup on initial pass
+            if warmup_count > 0:
+                warmup_reqs = scenario.requests[: min(warmup_count, len(scenario.requests))]
+                for req_spec in warmup_reqs:
+                    with contextlib.suppress(Exception):
+                        await backend.generate(req_spec.to_inference_request())
+
+            rep_snapshots: list[Any] = []
+            rep_results_raw: list[Any] = []
+
+            for _ in range(repetitions):
+                res = await runner.run(
+                    scenario=scenario,
+                    backend=backend,
+                    scheduler_config=scheduler_config,
+                )
+                rep_snapshots.append(res.telemetry_snapshot)
+                rep_results_raw.append(res)
+
+            # Aggregate across repetitions
+            durations = [r.duration_sec for r in rep_results_raw]
+            rpss = [r.requests_per_sec for r in rep_results_raw]
+            tok_pss = [r.tokens_per_sec for r in rep_results_raw]
+            mean_lats = [s.requests.avg_total_latency_ms for s in rep_snapshots]
+
+            all_lats: list[float] = []
+            for s in rep_snapshots:
+                # Reconstruct or pull individual latencies
+                all_lats.extend(
+                    [s.requests.p50_total_latency_ms] * max(1, s.requests.completed_requests)
+                )
+
+            avg_dur = sum(durations) / len(durations) if durations else 0.0
+            avg_rps = sum(rpss) / len(rpss) if rpss else 0.0
+            avg_tok_ps = sum(tok_pss) / len(tok_pss) if tok_pss else 0.0
+            avg_mean_lat = sum(mean_lats) / len(mean_lats) if mean_lats else 0.0
+
+            final_snap = rep_snapshots[-1]
+            req_stats = final_snap.requests
+            batch_stats = final_snap.batches
+            tp_stats = final_snap.throughput
+
+            # Canonical request records from final run
+            final_res = rep_results_raw[-1]
+            req_records = tuple(
+                VLLMBenchmarkRequestRecord(
+                    request_id=r.request_id,
+                    prompt_hash=compute_sha256(r.metadata.get("prompt", "")),
+                    output_hash=compute_sha256(r.generated_text),
+                    input_tokens=r.input_tokens or 0,
+                    output_tokens=r.output_tokens or 0,
+                    latency_ms=r.latency_ms,
+                    success=True,
+                )
+                for r in final_res.responses
+            )
+
+            label = VLLM_CONDITION_LABELS.get(condition, f"InferOpt Batch {max_batch_size}")
+            total_in = tp_stats.total_input_tokens
+            total_out = tp_stats.total_output_tokens
+            comp_count = req_stats.completed_requests
+
+            return VLLMConditionResult(
+                condition=condition,
+                condition_label=label,
+                concurrency=concurrency,
                 max_batch_size=max_batch_size,
-                batch_wait_ms=batch_wait_ms,
-            ),
-        )
-
-        # Warmup on initial pass
-        if warmup_count > 0:
-            warmup_reqs = scenario.requests[: min(warmup_count, len(scenario.requests))]
-            for req_spec in warmup_reqs:
-                with contextlib.suppress(Exception):
-                    await backend.generate(req_spec.to_inference_request())
-
-        rep_snapshots: list[Any] = []
-        rep_results_raw: list[Any] = []
-
-        for _ in range(repetitions):
-            res = await runner.run(
-                scenario=scenario,
-                backend=backend,
-                scheduler_config=scheduler_config,
+                total_requests=len(scenario.requests),
+                completed_requests=comp_count,
+                failed_requests=req_stats.failed_requests,
+                duration_sec=avg_dur,
+                requests_per_sec=avg_rps,
+                output_tokens_per_sec=avg_tok_ps,
+                total_tokens_per_sec=(total_in + total_out) / avg_dur if avg_dur > 0 else 0.0,
+                mean_latency_ms=avg_mean_lat,
+                median_latency_ms=req_stats.p50_total_latency_ms,
+                p50_latency_ms=req_stats.p50_total_latency_ms,
+                p95_latency_ms=req_stats.p95_total_latency_ms,
+                p99_latency_ms=req_stats.p99_total_latency_ms,
+                min_latency_ms=req_stats.min_total_latency_ms,
+                max_latency_ms=req_stats.max_total_latency_ms,
+                std_dev_latency_ms=0.0,
+                avg_queue_wait_ms=req_stats.avg_queue_wait_ms,
+                p50_queue_wait_ms=0.0,
+                p95_queue_wait_ms=0.0,
+                p99_queue_wait_ms=0.0,
+                avg_backend_execution_ms=req_stats.avg_execution_ms,
+                p50_backend_execution_ms=0.0,
+                p95_backend_execution_ms=0.0,
+                p99_backend_execution_ms=0.0,
+                total_input_tokens=total_in,
+                total_output_tokens=total_out,
+                total_tokens=total_in + total_out,
+                avg_input_tokens_per_req=(total_in / comp_count) if comp_count > 0 else 0.0,
+                avg_output_tokens_per_req=(total_out / comp_count) if comp_count > 0 else 0.0,
+                min_output_tokens=0,
+                max_output_tokens=0,
+                total_batches=batch_stats.total_batches,
+                avg_batch_size=batch_stats.avg_batch_size,
+                median_batch_size=batch_stats.avg_batch_size,
+                min_batch_size=batch_stats.min_batch_size,
+                max_batch_size_formed=batch_stats.max_batch_size,
+                batch_size_distribution={batch_stats.max_batch_size: batch_stats.total_batches},
+                avg_batch_formation_wait_ms=batch_stats.avg_batch_formation_wait_ms,
+                avg_batch_execution_ms=batch_stats.avg_batch_execution_ms,
+                repetition_count=repetitions,
+                requests=req_records,
             )
-            rep_snapshots.append(res.telemetry_snapshot)
-            rep_results_raw.append(res)
-
-        # Aggregate across repetitions
-        durations = [r.duration_sec for r in rep_results_raw]
-        rpss = [r.requests_per_sec for r in rep_results_raw]
-        tok_pss = [r.tokens_per_sec for r in rep_results_raw]
-        mean_lats = [s.requests.avg_total_latency_ms for s in rep_snapshots]
-
-        all_lats: list[float] = []
-        for s in rep_snapshots:
-            # Reconstruct or pull individual latencies
-            all_lats.extend(
-                [s.requests.p50_total_latency_ms] * max(1, s.requests.completed_requests)
-            )
-
-        avg_dur = sum(durations) / len(durations) if durations else 0.0
-        avg_rps = sum(rpss) / len(rpss) if rpss else 0.0
-        avg_tok_ps = sum(tok_pss) / len(tok_pss) if tok_pss else 0.0
-        avg_mean_lat = sum(mean_lats) / len(mean_lats) if mean_lats else 0.0
-
-        final_snap = rep_snapshots[-1]
-        req_stats = final_snap.requests
-        batch_stats = final_snap.batches
-        tp_stats = final_snap.throughput
-
-        # Canonical request records from final run
-        final_res = rep_results_raw[-1]
-        req_records = tuple(
-            VLLMBenchmarkRequestRecord(
-                request_id=r.request_id,
-                prompt_hash=compute_sha256(r.metadata.get("prompt", "")),
-                output_hash=compute_sha256(r.generated_text),
-                input_tokens=r.input_tokens or 0,
-                output_tokens=r.output_tokens or 0,
-                latency_ms=r.latency_ms,
-                success=True,
-            )
-            for r in final_res.responses
-        )
-
-        label = VLLM_CONDITION_LABELS.get(condition, f"InferOpt Batch {max_batch_size}")
-        total_in = tp_stats.total_input_tokens
-        total_out = tp_stats.total_output_tokens
-        comp_count = req_stats.completed_requests
-
-        return VLLMConditionResult(
-            condition=condition,
-            condition_label=label,
-            concurrency=concurrency,
-            max_batch_size=max_batch_size,
-            total_requests=len(scenario.requests),
-            completed_requests=comp_count,
-            failed_requests=req_stats.failed_requests,
-            duration_sec=avg_dur,
-            requests_per_sec=avg_rps,
-            output_tokens_per_sec=avg_tok_ps,
-            total_tokens_per_sec=(total_in + total_out) / avg_dur if avg_dur > 0 else 0.0,
-            mean_latency_ms=avg_mean_lat,
-            median_latency_ms=req_stats.p50_total_latency_ms,
-            p50_latency_ms=req_stats.p50_total_latency_ms,
-            p95_latency_ms=req_stats.p95_total_latency_ms,
-            p99_latency_ms=req_stats.p99_total_latency_ms,
-            min_latency_ms=req_stats.min_total_latency_ms,
-            max_latency_ms=req_stats.max_total_latency_ms,
-            std_dev_latency_ms=0.0,
-            avg_queue_wait_ms=req_stats.avg_queue_wait_ms,
-            p50_queue_wait_ms=0.0,
-            p95_queue_wait_ms=0.0,
-            p99_queue_wait_ms=0.0,
-            avg_backend_execution_ms=req_stats.avg_execution_ms,
-            p50_backend_execution_ms=0.0,
-            p95_backend_execution_ms=0.0,
-            p99_backend_execution_ms=0.0,
-            total_input_tokens=total_in,
-            total_output_tokens=total_out,
-            total_tokens=total_in + total_out,
-            avg_input_tokens_per_req=(total_in / comp_count) if comp_count > 0 else 0.0,
-            avg_output_tokens_per_req=(total_out / comp_count) if comp_count > 0 else 0.0,
-            min_output_tokens=0,
-            max_output_tokens=0,
-            total_batches=batch_stats.total_batches,
-            avg_batch_size=batch_stats.avg_batch_size,
-            median_batch_size=batch_stats.avg_batch_size,
-            min_batch_size=batch_stats.min_batch_size,
-            max_batch_size_formed=batch_stats.max_batch_size,
-            batch_size_distribution={batch_stats.max_batch_size: batch_stats.total_batches},
-            avg_batch_formation_wait_ms=batch_stats.avg_batch_formation_wait_ms,
-            avg_batch_execution_ms=batch_stats.avg_batch_execution_ms,
-            repetition_count=repetitions,
-            requests=req_records,
-        )
+        finally:
+            await backend.unload_model()
 
     async def run_scientific_benchmark(
         self,

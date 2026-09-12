@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID, VLLMConfig
+from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID, VLLMBackend, VLLMConfig
 from inferopt.benchmarks.generator import get_concurrent_4_workload, get_single_workload
 from inferopt.benchmarks.vllm_baseline import (
     DirectVLLMResult,
@@ -558,6 +558,22 @@ class TestDirectVLLMRunnerMocked:
                 enforce_eager=True,
             )
 
+    @pytest.mark.asyncio
+    async def test_direct_runner_unload_model(self) -> None:
+        """Verify DirectVLLMRunner.unload_model safely cleans up initialized engine."""
+        mock_vllm = _setup_mock_vllm_module()
+        runner = DirectVLLMRunner(model_id=DEFAULT_VLLM_MODEL_ID)
+
+        with patch.dict(sys.modules, {"vllm": mock_vllm}):
+            await runner.load_model()
+            assert runner.is_loaded is True
+
+            with patch("inferopt.benchmarks.vllm_baseline.cleanup_vllm_engine") as mock_cleanup:
+                await runner.unload_model()
+                assert runner.is_loaded is False
+                assert runner.model_load_time_ms == 0.0
+                mock_cleanup.assert_called_once()
+
 
 class TestVLLMValidatorMocked:
     """Unit tests for full scientific VLLMValidator with mock vLLM engine."""
@@ -632,6 +648,99 @@ class TestVLLMValidatorMocked:
             json_str = report.to_json()
             reloaded = VLLMExperimentReport.from_json(json_str)
             assert reloaded.environment.enforce_eager is True
+
+    @pytest.mark.asyncio
+    async def test_condition_direct_lifecycle_and_deterministic_teardown(self) -> None:
+        """Verify run_condition_direct loads engine and deterministically unloads it on exit."""
+        mock_vllm = _setup_mock_vllm_module()
+        validator = VLLMValidator(model_id=DEFAULT_VLLM_MODEL_ID)
+        scenario = get_single_workload(seed=42)
+
+        with (
+            patch.dict(sys.modules, {"vllm": mock_vllm}),
+            patch.object(
+                DirectVLLMRunner, "unload_model", autospec=True, return_value=None
+            ) as mock_unload,
+        ):
+            res = await validator.run_condition_direct(
+                scenario=scenario, concurrency=1, warmup_count=1, repetitions=1
+            )
+            assert res.condition == VLLMCondition.DIRECT_VLLM
+            assert res.completed_requests == 1
+            mock_unload.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_condition_inferopt_lifecycle_and_deterministic_teardown(self) -> None:
+        """Verify run_condition_inferopt loads backend and deterministically unloads it on exit."""
+        mock_vllm = _setup_mock_vllm_module()
+        validator = VLLMValidator(model_id=DEFAULT_VLLM_MODEL_ID)
+        scenario = get_single_workload(seed=42)
+
+        with (
+            patch.dict(sys.modules, {"vllm": mock_vllm}),
+            patch(
+                "inferopt.benchmarks.vllm_validation.VLLMBackend.unload_model",
+                autospec=True,
+                return_value=None,
+            ) as mock_unload,
+        ):
+            res = await validator.run_condition_inferopt(
+                scenario=scenario,
+                concurrency=1,
+                max_batch_size=2,
+                condition=VLLMCondition.INFEROPT_BATCH_2,
+                warmup_count=1,
+                repetitions=1,
+            )
+            assert res.condition == VLLMCondition.INFEROPT_BATCH_2
+            assert res.completed_requests == 1
+            mock_unload.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_per_condition_engine_isolation_across_sequential_conditions(self) -> None:
+        """Verify sequential conditions each invoke their dedicated engine lifecycle and unload."""
+        mock_vllm = _setup_mock_vllm_module()
+        validator = VLLMValidator(model_id=DEFAULT_VLLM_MODEL_ID)
+        scenario = get_single_workload(seed=42)
+
+        direct_unloads = 0
+        inferopt_unloads = 0
+
+        orig_direct_unload = DirectVLLMRunner.unload_model
+        orig_backend_unload = VLLMBackend.unload_model
+
+        async def _mock_direct_unload(self: Any) -> None:
+            nonlocal direct_unloads
+            direct_unloads += 1
+            await orig_direct_unload(self)
+
+        async def _mock_backend_unload(self: Any) -> None:
+            nonlocal inferopt_unloads
+            inferopt_unloads += 1
+            await orig_backend_unload(self)
+
+        with (
+            patch.dict(sys.modules, {"vllm": mock_vllm}),
+            patch.object(DirectVLLMRunner, "unload_model", _mock_direct_unload),
+            patch.object(VLLMBackend, "unload_model", _mock_backend_unload),
+            tempfile.TemporaryDirectory() as tmp_dir,
+        ):
+            # Run 1 concurrency with 2 batch sizes:
+            # Condition A (Direct), Condition B (Batch 1), Condition C (Batch 2)
+            report = await validator.run_scientific_benchmark(
+                scenario=scenario,
+                concurrency_levels=(1,),
+                batch_sizes=(1, 2),
+                warmup_count=1,
+                repetitions=1,
+                output_dir=tmp_dir,
+            )
+            assert report.integrity.is_valid is True
+            assert len(report.conditions) == 3
+            # 1 Direct vLLM condition unload
+            assert direct_unloads == 1
+            # 2 InferOpt conditions unloads (batch 1, batch 2)
+            assert inferopt_unloads == 2
 
 
 class TestLiveVLLMBenchmark:
