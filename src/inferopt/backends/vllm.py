@@ -3,6 +3,8 @@
 import argparse
 import asyncio
 import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -181,6 +183,7 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
         self._llm: Any = None
         self._model_load_time_ms: float = 0.0
         self._lock = asyncio.Lock()
+        self._executor: ThreadPoolExecutor | None = None
 
     @property
     def backend_name(self) -> str:
@@ -218,10 +221,10 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
         return self._model_load_time_ms
 
     async def load_model(self) -> None:
-        """Lazily initialize the vLLM engine in a worker thread.
+        """Lazily initialize the vLLM engine in a dedicated backend worker thread.
 
         Thread-safe, non-blocking to the asyncio event loop, and idempotent.
-        Reuses the single initialized LLM engine instance across requests.
+        Guarantees strict thread-affinity for the underlying ZeroMQ client sockets.
 
         Raises:
             BackendError: If vLLM dependencies are missing or initialization fails.
@@ -232,6 +235,14 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
         async with self._lock:
             if self.is_loaded:
                 return
+
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix=f"vllm-backend-{uuid.uuid4().hex[:4]}",
+                )
+
+            loop = asyncio.get_running_loop()
 
             def _load_sync() -> tuple[Any, float]:
                 try:
@@ -268,20 +279,29 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
                         f"Failed to initialize vLLM engine for '{self._config.model}': {exc}"
                     ) from exc
 
-            self._llm, self._model_load_time_ms = await asyncio.to_thread(_load_sync)
+            self._llm, self._model_load_time_ms = await loop.run_in_executor(
+                self._executor, _load_sync
+            )
 
     async def unload_model(self) -> None:
         """Safely and deterministically release the initialized vLLM engine from GPU memory."""
         async with self._lock:
-            if self._llm is None:
+            if self._llm is None and self._executor is None:
                 self._model_load_time_ms = 0.0
                 return
 
             llm_to_clean = self._llm
             self._llm = None
             self._model_load_time_ms = 0.0
+            executor = self._executor
+            self._executor = None
 
-            await asyncio.to_thread(cleanup_vllm_engine, llm_to_clean)
+            if executor is not None:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(executor, cleanup_vllm_engine, llm_to_clean)
+                executor.shutdown(wait=True)
+            else:
+                cleanup_vllm_engine(llm_to_clean)
 
     def _build_sampling_params(
         self,
@@ -367,8 +387,10 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
             return gen_text, in_tok, out_tok, lat_ms, finish_reason
 
         try:
-            gen_text, in_tok, out_tok, lat_ms, finish_reason = await asyncio.to_thread(
-                _generate_sync
+            loop = asyncio.get_running_loop()
+            assert self._executor is not None
+            gen_text, in_tok, out_tok, lat_ms, finish_reason = await loop.run_in_executor(
+                self._executor, _generate_sync
             )
             metadata = dict(request.metadata)
             if finish_reason:
@@ -451,7 +473,9 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
             return results
 
         try:
-            batch_results = await asyncio.to_thread(_batch_generate_sync)
+            loop = asyncio.get_running_loop()
+            assert self._executor is not None
+            batch_results = await loop.run_in_executor(self._executor, _batch_generate_sync)
 
             if len(batch_results) != len(batch.requests):
                 raise InferenceError(

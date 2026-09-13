@@ -72,39 +72,42 @@ async def run_vllm_scheduler_smoke_test(
     print(f"Submitting {len(requests)} requests to Scheduler...")
     t_start = time.perf_counter()
 
-    async with Scheduler(
-        backend=backend,
-        config=scheduler_config,
-        collector=collector,
-    ) as scheduler:
-        responses = await asyncio.gather(*[scheduler.submit(r) for r in requests])
+    try:
+        async with Scheduler(
+            backend=backend,
+            config=scheduler_config,
+            collector=collector,
+        ) as scheduler:
+            responses = await asyncio.gather(*[scheduler.submit(r) for r in requests])
 
-    t_total_sec = max(0.0001, time.perf_counter() - t_start)
-    snapshot = collector.snapshot()
-    req_stats = snapshot.requests
-    batch_stats = snapshot.batches
+        t_total_sec = max(0.0001, time.perf_counter() - t_start)
+        snapshot = collector.snapshot()
+        req_stats = snapshot.requests
+        batch_stats = snapshot.batches
 
-    print("-" * 60)
-    print("InferOpt VLLM E2E Smoke Test")
-    print("----------------------------")
-    print("Backend: VLLMBackend")
-    print(f"Requests: {req_stats.total_requests}")
-    print(f"Completed: {req_stats.completed_requests}")
-    print(f"Failed: {req_stats.failed_requests}")
-    print(f"Batches: {batch_stats.total_batches}")
-    print(f"Average batch size: {batch_stats.avg_batch_size:.1f}")
-    print(f"p50 latency: {req_stats.p50_total_latency_ms:.2f} ms")
-    print(f"p95 latency: {req_stats.p95_total_latency_ms:.2f} ms")
-    throughput = req_stats.completed_requests / t_total_sec
-    print(f"Throughput: {throughput:.2f} req/s")
-    print("=" * 60)
+        print("-" * 60)
+        print("InferOpt VLLM E2E Smoke Test")
+        print("----------------------------")
+        print("Backend: VLLMBackend")
+        print(f"Requests: {req_stats.total_requests}")
+        print(f"Completed: {req_stats.completed_requests}")
+        print(f"Failed: {req_stats.failed_requests}")
+        print(f"Batches: {batch_stats.total_batches}")
+        print(f"Average batch size: {batch_stats.avg_batch_size:.1f}")
+        print(f"p50 latency: {req_stats.p50_total_latency_ms:.2f} ms")
+        print(f"p95 latency: {req_stats.p95_total_latency_ms:.2f} ms")
+        throughput = req_stats.completed_requests / t_total_sec
+        print(f"Throughput: {throughput:.2f} req/s")
+        print("=" * 60)
 
-    for resp in responses:
-        print(
-            f"[{resp.request_id}] (tokens: in={resp.input_tokens}, "
-            f"out={resp.output_tokens}, lat={resp.latency_ms:.1f}ms):"
-        )
-        print(f"  {resp.generated_text.strip()[:100]}...\n")
+        for resp in responses:
+            print(
+                f"[{resp.request_id}] (tokens: in={resp.input_tokens}, "
+                f"out={resp.output_tokens}, lat={resp.latency_ms:.1f}ms):"
+            )
+            print(f"  {resp.generated_text.strip()[:100]}...\n")
+    finally:
+        await backend.unload_model()
 
 
 def build_parser() -> argparse.ArgumentParser:

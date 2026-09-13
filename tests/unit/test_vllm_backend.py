@@ -312,6 +312,49 @@ class TestVLLMBackendInitializationAndLifecycle:
                 assert backend.model_load_time_ms == 0.0
                 mock_cleanup.assert_called_once_with(mock_llm)
 
+    @pytest.mark.asyncio
+    async def test_executor_thread_affinity_and_lifecycle(self) -> None:
+        """Verify all engine operations run on the same dedicated single worker thread."""
+        import threading
+
+        observed_threads: list[str] = []
+
+        mock_llm = MagicMock()
+
+        def _mock_llm_init(**kwargs: Any) -> MagicMock:
+            observed_threads.append(f"init:{threading.current_thread().name}")
+            return mock_llm
+
+        def _mock_generate(prompts: list[str], **kwargs: Any) -> list[MagicMock]:
+            observed_threads.append(f"gen:{threading.current_thread().name}")
+            return [_create_mock_vllm_output(prompt=p) for p in prompts]
+
+        mock_llm.generate.side_effect = _mock_generate
+        mock_vllm = MagicMock()
+        mock_vllm.LLM.side_effect = _mock_llm_init
+        mock_vllm.SamplingParams = MagicMock()
+
+        backend = VLLMBackend()
+        with patch.dict(sys.modules, {"vllm": mock_vllm}):
+            await backend.load_model()
+            assert backend._executor is not None
+            executor_thread_prefix = backend._executor._thread_name_prefix
+
+            req = InferenceRequest(request_id="th-1", model="vllm", prompt="test")
+            await backend.generate(req)
+
+            await backend.unload_model()
+            assert backend._executor is None
+
+        # Verify both init and generate executed on the same worker thread prefix
+        assert len(observed_threads) == 2
+        assert observed_threads[0].startswith(f"init:{executor_thread_prefix}")
+        assert observed_threads[1].startswith(f"gen:{executor_thread_prefix}")
+        # The thread name for init and gen must be identical
+        init_thread = observed_threads[0].split(":", 1)[1]
+        gen_thread = observed_threads[1].split(":", 1)[1]
+        assert init_thread == gen_thread
+
 
 class TestVLLMBackendSingleGeneration:
     """Tests single request generation, parameter mapping, and token accounting."""

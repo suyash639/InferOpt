@@ -9,6 +9,7 @@ import hashlib
 import math
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -154,6 +155,7 @@ class DirectVLLMRunner:
         self._llm: Any = None
         self._model_load_time_ms: float = 0.0
         self._lock = asyncio.Lock()
+        self._executor: ThreadPoolExecutor | None = None
 
     @property
     def model_id(self) -> str:
@@ -176,13 +178,21 @@ class DirectVLLMRunner:
         return self._model_load_time_ms
 
     async def load_model(self) -> None:
-        """Load vLLM engine into memory if not already loaded."""
+        """Load vLLM engine into memory if not already loaded in dedicated worker thread."""
         if self.is_loaded:
             return
 
         async with self._lock:
             if self.is_loaded:
                 return
+
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix=f"direct-vllm-{uuid.uuid4().hex[:4]}",
+                )
+
+            loop = asyncio.get_running_loop()
 
             def _load_sync() -> tuple[Any, float]:
                 try:
@@ -218,20 +228,29 @@ class DirectVLLMRunner:
                         f"Failed to initialize vLLM engine for '{self._config.model}': {exc}"
                     ) from exc
 
-            self._llm, self._model_load_time_ms = await asyncio.to_thread(_load_sync)
+            self._llm, self._model_load_time_ms = await loop.run_in_executor(
+                self._executor, _load_sync
+            )
 
     async def unload_model(self) -> None:
         """Safely and deterministically release the initialized vLLM engine from GPU memory."""
         async with self._lock:
-            if self._llm is None:
+            if self._llm is None and self._executor is None:
                 self._model_load_time_ms = 0.0
                 return
 
             llm_to_clean = self._llm
             self._llm = None
             self._model_load_time_ms = 0.0
+            executor = self._executor
+            self._executor = None
 
-            await asyncio.to_thread(cleanup_vllm_engine, llm_to_clean)
+            if executor is not None:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(executor, cleanup_vllm_engine, llm_to_clean)
+                executor.shutdown(wait=True)
+            else:
+                cleanup_vllm_engine(llm_to_clean)
 
     def _build_sampling_params(self, temperature: float, max_tokens: int) -> Any:
         """Construct a vLLM SamplingParams object."""
@@ -259,6 +278,8 @@ class DirectVLLMRunner:
             return
 
         await self.load_model()
+        assert self._executor is not None
+        loop = asyncio.get_running_loop()
 
         def _warmup_sync() -> None:
             import contextlib
@@ -272,7 +293,7 @@ class DirectVLLMRunner:
                         use_tqdm=False,
                     )
 
-        await asyncio.to_thread(_warmup_sync)
+        await loop.run_in_executor(self._executor, _warmup_sync)
 
     async def execute_request(self, spec: WorkloadRequestSpec) -> DirectVLLMRequestResult:
         """Execute a single request directly against vLLM.
@@ -310,7 +331,11 @@ class DirectVLLMRunner:
             return gen_text, in_tokens, out_tokens, lat_ms
 
         try:
-            gen_text, in_tokens, out_tokens, lat_ms = await asyncio.to_thread(_sync_gen)
+            loop = asyncio.get_running_loop()
+            assert self._executor is not None
+            gen_text, in_tokens, out_tokens, lat_ms = await loop.run_in_executor(
+                self._executor, _sync_gen
+            )
             out_hash = compute_sha256(gen_text)
             return DirectVLLMRequestResult(
                 request_id=spec.request_id,

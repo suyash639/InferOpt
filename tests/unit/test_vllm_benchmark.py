@@ -175,6 +175,30 @@ class TestVLLMBenchmarkModelsAndIntegrity:
         )
         assert meta_eager.enforce_eager is True
 
+    def test_environment_metadata_collection_via_nvidia_smi(self) -> None:
+        """Verify metadata collection uses nvidia-smi without initializing PyTorch CUDA."""
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_res.stdout = "Tesla T4\nTesla T4\n"
+
+        with patch("subprocess.run", return_value=mock_res) as mock_run:
+            meta = collect_vllm_environment_metadata(
+                model_id="mock-model",
+                warmup_count=1,
+                repetitions=1,
+                workload_seed=42,
+                workload_hash="abc123hash",
+            )
+            mock_run.assert_called_once_with(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                check=False,
+            )
+            assert meta.gpu_name == "Tesla T4"
+            assert meta.gpu_count == 2
+
     def test_integrity_validation_success(self) -> None:
         scenario = get_concurrent_4_workload(seed=42)
         w_hash = compute_workload_hash(scenario)
@@ -573,6 +597,54 @@ class TestDirectVLLMRunnerMocked:
                 assert runner.is_loaded is False
                 assert runner.model_load_time_ms == 0.0
                 mock_cleanup.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_direct_runner_thread_affinity_and_lifecycle(self) -> None:
+        """Verify DirectVLLMRunner executes all operations on the same dedicated worker thread."""
+        import threading
+
+        from inferopt.benchmarks.models import WorkloadRequestSpec
+
+        observed_threads: list[str] = []
+        mock_llm = MagicMock()
+
+        def _mock_llm_init(**kwargs: Any) -> MagicMock:
+            observed_threads.append(f"init:{threading.current_thread().name}")
+            return mock_llm
+
+        def _mock_generate(prompts: list[str], **kwargs: Any) -> list[MagicMock]:
+            observed_threads.append(f"gen:{threading.current_thread().name}")
+            return [_create_mock_vllm_output(prompt=p) for p in prompts]
+
+        mock_llm.generate.side_effect = _mock_generate
+        mock_vllm = MagicMock()
+        mock_vllm.LLM.side_effect = _mock_llm_init
+        mock_vllm.SamplingParams = MagicMock()
+
+        runner = DirectVLLMRunner(model_id=DEFAULT_VLLM_MODEL_ID)
+        with patch.dict(sys.modules, {"vllm": mock_vllm}):
+            await runner.load_model()
+            assert runner._executor is not None
+            executor_thread_prefix = runner._executor._thread_name_prefix
+
+            spec = WorkloadRequestSpec(
+                request_id="req-1",
+                prompt="test prompt",
+                max_tokens=16,
+                temperature=0.0,
+            )
+            res = await runner.execute_request(spec)
+            assert res.success is True
+
+            await runner.unload_model()
+            assert runner._executor is None
+
+        assert len(observed_threads) == 2
+        assert observed_threads[0].startswith(f"init:{executor_thread_prefix}")
+        assert observed_threads[1].startswith(f"gen:{executor_thread_prefix}")
+        init_th = observed_threads[0].split(":", 1)[1]
+        gen_th = observed_threads[1].split(":", 1)[1]
+        assert init_th == gen_th
 
 
 class TestVLLMValidatorMocked:

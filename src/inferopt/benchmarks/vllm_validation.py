@@ -9,6 +9,8 @@ overhead analysis, and objective findings classification (PROVEN / SUGGESTED / N
 import contextlib
 import hashlib
 import platform
+import subprocess
+import sys
 import time
 import uuid
 from collections.abc import Sequence
@@ -297,7 +299,11 @@ def collect_vllm_environment_metadata(
     workload_hash: str,
     enforce_eager: bool = False,
 ) -> VLLMEnvironmentMetadata:
-    """Inspect and capture local hardware, GPU, and Python runtime metadata."""
+    """Inspect and capture local hardware, GPU, and Python runtime metadata.
+
+    Queries nvidia-smi via subprocess to discover GPU devices without prematurely
+    initializing PyTorch CUDA runtime in the parent process prior to vLLM startup.
+    """
     vllm_ver = "unknown"
     torch_ver = "unknown"
     cuda_ver = "unknown"
@@ -317,12 +323,39 @@ def collect_vllm_environment_metadata(
         torch_ver = getattr(torch, "__version__", "unknown")
         if hasattr(torch, "version") and hasattr(torch.version, "cuda"):
             cuda_ver = str(torch.version.cuda or "none")
-        if hasattr(torch, "cuda") and torch.cuda.is_available():
-            gpu_count = torch.cuda.device_count()
-            if gpu_count > 0:
-                gpu_name = str(torch.cuda.get_device_name(0))
     except ImportError:
         pass
+
+    # Safe GPU metadata discovery via nvidia-smi (avoids torch.cuda.init() in parent process)
+    try:
+        smi_res = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+        if smi_res.returncode == 0 and smi_res.stdout.strip():
+            gpu_lines = [
+                line.strip() for line in smi_res.stdout.strip().splitlines() if line.strip()
+            ]
+            if gpu_lines:
+                gpu_count = len(gpu_lines)
+                gpu_name = gpu_lines[0]
+    except Exception:
+        pass
+
+    # Fallback to torch.cuda only if CUDA runtime is already initialized or nvidia-smi missing
+    if gpu_count == 0 and "torch" in sys.modules:
+        try:
+            import torch
+
+            if hasattr(torch, "cuda") and torch.cuda.is_available():
+                gpu_count = torch.cuda.device_count()
+                if gpu_count > 0:
+                    gpu_name = str(torch.cuda.get_device_name(0))
+        except Exception:
+            pass
 
     return VLLMEnvironmentMetadata(
         os_name=platform.system(),
