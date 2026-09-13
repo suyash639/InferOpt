@@ -31,6 +31,7 @@ from inferopt.benchmarks.vllm_baseline import (
     compute_sha256,
     compute_std_dev,
 )
+from inferopt.core.models import InferenceBatch
 from inferopt.scheduler.config import BatchConfig, SchedulerConfig
 
 
@@ -902,12 +903,32 @@ class VLLMValidator:
                 ),
             )
 
-            # Warmup on initial pass
+            # Comprehensive Warmup to pre-compile all Triton attention kernels
             if warmup_count > 0:
-                warmup_reqs = scenario.requests[: min(warmup_count, len(scenario.requests))]
-                for req_spec in warmup_reqs:
+                # 1. Warm up single-request path
+                sample_reqs = scenario.requests[: min(max(1, warmup_count), len(scenario.requests))]
+                for req_spec in sample_reqs:
                     with contextlib.suppress(Exception):
                         await backend.generate(req_spec.to_inference_request())
+
+                # 2. Warm up batched inference paths for all powers of 2 up to max_batch_size
+                if max_batch_size > 1 and hasattr(backend, "generate_batch"):
+                    probe_sizes = [s for s in (2, 4, 8, 16, 32) if s <= max_batch_size]
+                    if max_batch_size not in probe_sizes:
+                        probe_sizes.append(max_batch_size)
+
+                    for p_size in sorted(set(probe_sizes)):
+                        probe_req_specs = [
+                            scenario.requests[i % len(scenario.requests)] for i in range(p_size)
+                        ]
+                        probe_inf_reqs = [r.to_inference_request() for r in probe_req_specs]
+                        probe_batch = InferenceBatch(
+                            batch_id=f"warmup-b{p_size}-{uuid.uuid4().hex[:4]}",
+                            requests=tuple(probe_inf_reqs),
+                        )
+                        for _ in range(warmup_count):
+                            with contextlib.suppress(Exception):
+                                await backend.generate_batch(probe_batch)
 
             rep_snapshots: list[Any] = []
             rep_results_raw: list[Any] = []
@@ -927,17 +948,34 @@ class VLLMValidator:
             tok_pss = [r.tokens_per_sec for r in rep_results_raw]
             mean_lats = [s.requests.avg_total_latency_ms for s in rep_snapshots]
 
+            # Pool all individual request latencies across all repetitions (warmup excluded)
             all_lats: list[float] = []
-            for s in rep_snapshots:
-                # Reconstruct or pull individual latencies
-                all_lats.extend(
-                    [s.requests.p50_total_latency_ms] * max(1, s.requests.completed_requests)
-                )
+            for res in rep_results_raw:
+                for resp in res.responses:
+                    all_lats.append(resp.latency_ms)
 
             avg_dur = sum(durations) / len(durations) if durations else 0.0
             avg_rps = sum(rpss) / len(rpss) if rpss else 0.0
             avg_tok_ps = sum(tok_pss) / len(tok_pss) if tok_pss else 0.0
             avg_mean_lat = sum(mean_lats) / len(mean_lats) if mean_lats else 0.0
+
+            p50_lat = calculate_percentile(all_lats, 50.0) if all_lats else 0.0
+            p95_lat = calculate_percentile(all_lats, 95.0) if all_lats else 0.0
+            p99_lat = calculate_percentile(all_lats, 99.0) if all_lats else 0.0
+            min_lat = min(all_lats, default=0.0)
+            max_lat = max(all_lats, default=0.0)
+            std_dev_lat = compute_std_dev(all_lats, avg_mean_lat) if len(all_lats) > 1 else 0.0
+
+            avg_q_wait = (
+                sum(s.requests.avg_queue_wait_ms for s in rep_snapshots) / len(rep_snapshots)
+                if rep_snapshots
+                else 0.0
+            )
+            avg_backend_exec = (
+                sum(s.requests.avg_execution_ms for s in rep_snapshots) / len(rep_snapshots)
+                if rep_snapshots
+                else 0.0
+            )
 
             final_snap = rep_snapshots[-1]
             req_stats = final_snap.requests
@@ -964,6 +1002,17 @@ class VLLMValidator:
             total_out = tp_stats.total_output_tokens
             comp_count = req_stats.completed_requests
 
+            out_tokens_list = [
+                r.output_tokens for r in final_res.responses if r.output_tokens is not None
+            ]
+            min_out = min(out_tokens_list, default=0)
+            max_out = max(out_tokens_list, default=0)
+
+            batch_size_dist: dict[int, int] = {}
+            if batch_stats.total_batches > 0:
+                eff_size = max(1, round(batch_stats.avg_batch_size))
+                batch_size_dist = {eff_size: batch_stats.total_batches}
+
             return VLLMConditionResult(
                 condition=condition,
                 condition_label=label,
@@ -977,18 +1026,18 @@ class VLLMValidator:
                 output_tokens_per_sec=avg_tok_ps,
                 total_tokens_per_sec=(total_in + total_out) / avg_dur if avg_dur > 0 else 0.0,
                 mean_latency_ms=avg_mean_lat,
-                median_latency_ms=req_stats.p50_total_latency_ms,
-                p50_latency_ms=req_stats.p50_total_latency_ms,
-                p95_latency_ms=req_stats.p95_total_latency_ms,
-                p99_latency_ms=req_stats.p99_total_latency_ms,
-                min_latency_ms=req_stats.min_total_latency_ms,
-                max_latency_ms=req_stats.max_total_latency_ms,
-                std_dev_latency_ms=0.0,
-                avg_queue_wait_ms=req_stats.avg_queue_wait_ms,
+                median_latency_ms=p50_lat,
+                p50_latency_ms=p50_lat,
+                p95_latency_ms=p95_lat,
+                p99_latency_ms=p99_lat,
+                min_latency_ms=min_lat,
+                max_latency_ms=max_lat,
+                std_dev_latency_ms=std_dev_lat,
+                avg_queue_wait_ms=avg_q_wait,
                 p50_queue_wait_ms=0.0,
                 p95_queue_wait_ms=0.0,
                 p99_queue_wait_ms=0.0,
-                avg_backend_execution_ms=req_stats.avg_execution_ms,
+                avg_backend_execution_ms=avg_backend_exec,
                 p50_backend_execution_ms=0.0,
                 p95_backend_execution_ms=0.0,
                 p99_backend_execution_ms=0.0,
@@ -997,14 +1046,14 @@ class VLLMValidator:
                 total_tokens=total_in + total_out,
                 avg_input_tokens_per_req=(total_in / comp_count) if comp_count > 0 else 0.0,
                 avg_output_tokens_per_req=(total_out / comp_count) if comp_count > 0 else 0.0,
-                min_output_tokens=0,
-                max_output_tokens=0,
+                min_output_tokens=min_out,
+                max_output_tokens=max_out,
                 total_batches=batch_stats.total_batches,
                 avg_batch_size=batch_stats.avg_batch_size,
                 median_batch_size=batch_stats.avg_batch_size,
                 min_batch_size=batch_stats.min_batch_size,
                 max_batch_size_formed=batch_stats.max_batch_size,
-                batch_size_distribution={batch_stats.max_batch_size: batch_stats.total_batches},
+                batch_size_distribution=batch_size_dist,
                 avg_batch_formation_wait_ms=batch_stats.avg_batch_formation_wait_ms,
                 avg_batch_execution_ms=batch_stats.avg_batch_execution_ms,
                 repetition_count=repetitions,

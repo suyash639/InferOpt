@@ -814,6 +814,32 @@ class TestVLLMValidatorMocked:
             # 2 InferOpt conditions unloads (batch 1, batch 2)
             assert inferopt_unloads == 2
 
+    @pytest.mark.asyncio
+    async def test_comprehensive_warmup_and_percentile_pooling(self) -> None:
+        """Verify comprehensive warmup exercises batch sizes and pools metrics across reps."""
+        mock_vllm = _setup_mock_vllm_module()
+        validator = VLLMValidator(model_id=DEFAULT_VLLM_MODEL_ID)
+        scenario = get_concurrent_4_workload(seed=42)
+
+        with patch.dict(sys.modules, {"vllm": mock_vllm}):
+            res = await validator.run_condition_inferopt(
+                scenario=scenario,
+                concurrency=4,
+                max_batch_size=4,
+                condition=VLLMCondition.INFEROPT_BATCH_4,
+                warmup_count=2,
+                repetitions=3,
+            )
+            assert res.condition == VLLMCondition.INFEROPT_BATCH_4
+            assert res.completed_requests == 4
+            assert res.repetition_count == 3
+            assert res.p50_latency_ms > 0.0
+            assert res.min_output_tokens > 0
+            assert res.max_output_tokens > 0
+            # Ensure mock_llm generate was called for warmup single + batch probes + repetitions
+            mock_llm_instance = mock_vllm.LLM.return_value
+            assert mock_llm_instance.generate.call_count >= 5
+
 
 class TestLiveVLLMBenchmark:
     """Live hardware tests executed only on compatible NVIDIA GPU systems."""

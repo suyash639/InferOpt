@@ -9,6 +9,7 @@ import hashlib
 import math
 import time
 import uuid
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -268,11 +269,20 @@ class DirectVLLMRunner:
         sampling_kwargs.update(self._config.extra_sampling_args)
         return vllm.SamplingParams(**sampling_kwargs)
 
-    async def warmup(self, count: int = 1) -> None:
-        """Execute warmup requests to initialize CUDA graphs and memory pools.
+    async def warmup(
+        self,
+        count: int = 1,
+        prompts: Sequence[str] | None = None,
+        max_tokens: int | None = None,
+        batch_size: int = 1,
+    ) -> None:
+        """Execute warmup requests to initialize CUDA graphs, memory pools, and Triton JIT kernels.
 
         Args:
             count: Number of warmup iterations to execute.
+            prompts: Optional list of representative prompts to exercise attention kernels.
+            max_tokens: Optional token generation budget to match scenario workload.
+            batch_size: Optional batch size dimension to warm up.
         """
         if count <= 0:
             return
@@ -281,14 +291,26 @@ class DirectVLLMRunner:
         assert self._executor is not None
         loop = asyncio.get_running_loop()
 
+        probe_prompts = list(prompts) if prompts else ["Warmup probe query."]
+        probe_max_tokens = max_tokens if (max_tokens is not None and max_tokens > 0) else 16
+        b_size = max(1, batch_size)
+
+        # Expand prompt list to match target batch dimension if needed
+        if b_size > 1:
+            expanded_prompts = [probe_prompts[i % len(probe_prompts)] for i in range(b_size)]
+        else:
+            expanded_prompts = [probe_prompts[0]]
+
         def _warmup_sync() -> None:
             import contextlib
 
-            sampling_params = self._build_sampling_params(temperature=0.0, max_tokens=16)
+            sampling_params = self._build_sampling_params(
+                temperature=0.0, max_tokens=probe_max_tokens
+            )
             for _ in range(count):
                 with contextlib.suppress(Exception):
                     self._llm.generate(
-                        prompts=["Warmup probe query."],
+                        prompts=expanded_prompts,
                         sampling_params=sampling_params,
                         use_tqdm=False,
                     )
@@ -384,7 +406,16 @@ class DirectVLLMRunner:
         await self.load_model()
 
         if warmup_count > 0:
-            await self.warmup(count=warmup_count)
+            sample_prompts = [
+                r.prompt for r in scenario.requests[: max(1, min(len(scenario.requests), 4))]
+            ]
+            sample_max_tok = scenario.requests[0].max_tokens if scenario.requests else 16
+            await self.warmup(
+                count=warmup_count,
+                prompts=sample_prompts,
+                max_tokens=sample_max_tok,
+                batch_size=min(concurrency, 4),
+            )
 
         sem = asyncio.Semaphore(max(1, concurrency))
 
