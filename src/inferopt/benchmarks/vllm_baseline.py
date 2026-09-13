@@ -7,6 +7,7 @@ passing through the InferOpt scheduler, establishing an unmediated baseline.
 import asyncio
 import hashlib
 import math
+import sys
 import time
 import uuid
 from collections.abc import Sequence
@@ -275,6 +276,7 @@ class DirectVLLMRunner:
         prompts: Sequence[str] | None = None,
         max_tokens: int | None = None,
         batch_size: int = 1,
+        verbose: bool = True,
     ) -> None:
         """Execute warmup requests to initialize CUDA graphs, memory pools, and Triton JIT kernels.
 
@@ -283,6 +285,7 @@ class DirectVLLMRunner:
             prompts: Optional list of representative prompts to exercise attention kernels.
             max_tokens: Optional token generation budget to match scenario workload.
             batch_size: Optional batch size dimension to warm up.
+            verbose: If True, prints timestamped warmup progress messages.
         """
         if count <= 0:
             return
@@ -302,18 +305,36 @@ class DirectVLLMRunner:
             expanded_prompts = [probe_prompts[0]]
 
         def _warmup_sync() -> None:
-            import contextlib
-
             sampling_params = self._build_sampling_params(
                 temperature=0.0, max_tokens=probe_max_tokens
             )
-            for _ in range(count):
-                with contextlib.suppress(Exception):
-                    self._llm.generate(
+            for w_idx in range(count):
+                t_p0 = time.perf_counter()
+                try:
+                    outputs = self._llm.generate(
                         prompts=expanded_prompts,
                         sampling_params=sampling_params,
                         use_tqdm=False,
                     )
+                    lat_ms = (time.perf_counter() - t_p0) * 1000.0
+                    tot_out = sum(
+                        len(o.outputs[0].token_ids)
+                        for o in outputs
+                        if o.outputs and o.outputs[0].token_ids
+                    )
+                    if verbose:
+                        print(
+                            f"  [WARMUP PROBE] Direct vLLM: batch_size={len(expanded_prompts)}, "
+                            f"max_tokens={probe_max_tokens}, out_tokens={tot_out}, "
+                            f"latency={lat_ms:.2f}ms (iter {w_idx + 1}/{count})"
+                        )
+                except Exception as exc:
+                    if verbose:
+                        print(
+                            f"  [WARMUP ERROR] Direct vLLM warmup probe failed: {exc}",
+                            file=sys.stderr,
+                        )
+                    raise
 
         await loop.run_in_executor(self._executor, _warmup_sync)
 

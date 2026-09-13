@@ -6,8 +6,8 @@ non-intrusive warmup separation, an automated integrity gate, differential
 overhead analysis, and objective findings classification (PROVEN / SUGGESTED / NOT PROVEN).
 """
 
-import contextlib
 import hashlib
+import os
 import platform
 import subprocess
 import sys
@@ -764,17 +764,50 @@ class VLLMValidator:
         runner = DirectVLLMRunner(config=self._config)
         try:
             await runner.load_model()
-            rep_results: list[DirectVLLMResult] = []
+            pid_info = os.getpid()
+            print(
+                f"\n[WARMUP START] Condition: A. Direct vLLM "
+                f"(concurrency={concurrency}, PID={pid_info})"
+            )
+            t_w_start = time.perf_counter()
+            if warmup_count > 0:
+                sample_prompts = [
+                    r.prompt
+                    for r in scenario.requests[: min(len(scenario.requests), max(concurrency, 4))]
+                ]
+                sample_max_tok = scenario.requests[0].max_tokens if scenario.requests else 32
+                await runner.warmup(
+                    count=warmup_count,
+                    prompts=sample_prompts,
+                    max_tokens=sample_max_tok,
+                    batch_size=min(concurrency, 4),
+                    verbose=True,
+                )
+            tot_w_ms = (time.perf_counter() - t_w_start) * 1000.0
+            print(
+                f"[WARMUP FINISHED] Condition: A. Direct vLLM in {tot_w_ms:.2f}ms. "
+                f"Starting {repetitions} measured repetitions...\n"
+            )
 
+            rep_results: list[DirectVLLMResult] = []
             for rep_idx in range(repetitions):
-                # Only warmup on the first repetition trial
-                w_count = warmup_count if rep_idx == 0 else 0
+                print(
+                    f"[MEASURED RUN START] Condition: A. Direct vLLM | "
+                    f"Repetition {rep_idx + 1}/{repetitions}"
+                )
+                t_rep_start = time.perf_counter()
                 res = await runner.run(
                     scenario=scenario,
-                    warmup_count=w_count,
+                    warmup_count=0,
                     concurrency=concurrency,
                 )
                 rep_results.append(res)
+                rep_dur = time.perf_counter() - t_rep_start
+                print(
+                    f"[MEASURED RUN FINISHED] Condition: A. Direct vLLM | "
+                    f"Repetition {rep_idx + 1}/{repetitions} in {rep_dur:.3f}s "
+                    f"({res.requests_per_sec:.2f} req/s, avg_lat={res.avg_latency_ms:.2f}ms)"
+                )
 
             # Aggregate metrics across repetitions
             durations = [r.duration_sec for r in rep_results]
@@ -894,6 +927,13 @@ class VLLMValidator:
         try:
             await backend.load_model()
             runner = BenchmarkRunner()
+            pid_info = os.getpid()
+            label = VLLM_CONDITION_LABELS.get(condition, f"InferOpt Batch {max_batch_size}")
+            print(
+                f"\n[WARMUP START] Condition: {label} "
+                f"(max_batch_size={max_batch_size}, concurrency={concurrency}, PID={pid_info})"
+            )
+            t_w_start = time.perf_counter()
 
             scheduler_config = SchedulerConfig(
                 max_concurrency=concurrency,
@@ -905,19 +945,23 @@ class VLLMValidator:
 
             # Comprehensive Warmup to pre-compile all Triton attention kernels
             if warmup_count > 0:
-                # 1. Warm up single-request path
+                # 1. Warm up single-request path with representative scenario prompts
                 sample_reqs = scenario.requests[: min(max(1, warmup_count), len(scenario.requests))]
-                for req_spec in sample_reqs:
-                    with contextlib.suppress(Exception):
-                        await backend.generate(req_spec.to_inference_request())
+                for req_idx, req_spec in enumerate(sample_reqs):
+                    t0 = time.perf_counter()
+                    inf_req = req_spec.to_inference_request()
+                    inf_resp = await backend.generate(inf_req)
+                    w_lat = (time.perf_counter() - t0) * 1000.0
+                    print(
+                        f"  [WARMUP PROBE] Single-request ({req_idx + 1}/{len(sample_reqs)}): "
+                        f"prompt_len={inf_resp.input_tokens}, "
+                        f"out_tokens={inf_resp.output_tokens}, "
+                        f"latency={w_lat:.2f}ms"
+                    )
 
-                # 2. Warm up batched inference paths for all powers of 2 up to max_batch_size
+                # 2. Warm up batched inference paths for ALL batch sizes from 2 up to max_batch_size
                 if max_batch_size > 1 and hasattr(backend, "generate_batch"):
-                    probe_sizes = [s for s in (2, 4, 8, 16, 32) if s <= max_batch_size]
-                    if max_batch_size not in probe_sizes:
-                        probe_sizes.append(max_batch_size)
-
-                    for p_size in sorted(set(probe_sizes)):
+                    for p_size in range(2, max_batch_size + 1):
                         probe_req_specs = [
                             scenario.requests[i % len(scenario.requests)] for i in range(p_size)
                         ]
@@ -926,14 +970,34 @@ class VLLMValidator:
                             batch_id=f"warmup-b{p_size}-{uuid.uuid4().hex[:4]}",
                             requests=tuple(probe_inf_reqs),
                         )
-                        for _ in range(warmup_count):
-                            with contextlib.suppress(Exception):
-                                await backend.generate_batch(probe_batch)
+                        for w_i in range(warmup_count):
+                            t0 = time.perf_counter()
+                            batch_resps = await backend.generate_batch(probe_batch)
+                            w_lat = (time.perf_counter() - t0) * 1000.0
+                            tot_in = sum(r.input_tokens for r in batch_resps)
+                            tot_out = sum(r.output_tokens for r in batch_resps)
+                            print(
+                                f"  [WARMUP PROBE] Batch size {p_size} "
+                                f"(iter {w_i + 1}/{warmup_count}): "
+                                f"in_tokens={tot_in}, out_tokens={tot_out}, "
+                                f"latency={w_lat:.2f}ms"
+                            )
+
+            tot_w_ms = (time.perf_counter() - t_w_start) * 1000.0
+            print(
+                f"[WARMUP FINISHED] Condition: {label} in {tot_w_ms:.2f}ms. "
+                f"Starting {repetitions} measured repetitions...\n"
+            )
 
             rep_snapshots: list[Any] = []
             rep_results_raw: list[Any] = []
 
-            for _ in range(repetitions):
+            for rep_idx in range(repetitions):
+                print(
+                    f"[MEASURED RUN START] Condition: {label} | "
+                    f"Repetition {rep_idx + 1}/{repetitions}"
+                )
+                t_rep_start = time.perf_counter()
                 res = await runner.run(
                     scenario=scenario,
                     backend=backend,
@@ -941,6 +1005,12 @@ class VLLMValidator:
                 )
                 rep_snapshots.append(res.telemetry_snapshot)
                 rep_results_raw.append(res)
+                rep_dur = time.perf_counter() - t_rep_start
+                print(
+                    f"[MEASURED RUN FINISHED] Condition: {label} | "
+                    f"Repetition {rep_idx + 1}/{repetitions} in {rep_dur:.3f}s "
+                    f"({res.requests_per_sec:.2f} req/s, avg_lat={res.avg_latency_ms:.2f}ms)"
+                )
 
             # Aggregate across repetitions
             durations = [r.duration_sec for r in rep_results_raw]
