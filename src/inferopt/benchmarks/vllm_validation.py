@@ -108,6 +108,40 @@ class VLLMBenchmarkRequestRecord(BaseModel):
     success: bool = Field(description="True if generation succeeded")
 
 
+class VLLMRepetitionMeasurement(BaseModel):
+    """Granular measurement record for an individual benchmark repetition trial."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    repetition_index: int = Field(ge=1, description="1-indexed repetition trial number")
+    warmup_count: int = Field(ge=0, description="Warmup iterations executed prior to this trial")
+    measured_request_count: int = Field(
+        ge=0, description="Count of requests measured in this trial"
+    )
+    duration_sec: float = Field(ge=0.0, description="Measured trial duration in seconds")
+    requests_per_sec: float = Field(ge=0.0, description="Throughput in requests per second")
+    output_tokens_per_sec: float = Field(ge=0.0, description="Output token throughput")
+    total_tokens_per_sec: float = Field(ge=0.0, description="Total token throughput")
+    mean_latency_ms: float = Field(ge=0.0, description="Mean request turnaround latency in ms")
+    p50_latency_ms: float = Field(ge=0.0, description="Median (P50) request latency in ms")
+    p95_latency_ms: float = Field(ge=0.0, description="95th percentile request latency in ms")
+    p99_latency_ms: float = Field(ge=0.0, description="99th percentile request latency in ms")
+    min_latency_ms: float = Field(ge=0.0, description="Minimum request latency in ms")
+    max_latency_ms: float = Field(ge=0.0, description="Maximum request latency in ms")
+    avg_queue_wait_ms: float = Field(ge=0.0, description="Average queue wait time in ms")
+    avg_backend_execution_ms: float = Field(
+        ge=0.0, description="Average backend execution time in ms"
+    )
+    total_batches: int = Field(ge=0, description="Batches formed during this trial")
+    avg_batch_size: float = Field(ge=0.0, description="Average batch size formed")
+    completed_requests: int = Field(ge=0, description="Completed requests count")
+    failed_requests: int = Field(ge=0, description="Failed requests count")
+    integrity_valid: bool = Field(description="True if all requests succeeded")
+    engine_lifecycle_status: str = Field(
+        default="active", description="Engine lifecycle state at completion of trial"
+    )
+
+
 class VLLMConditionResult(BaseModel):
     """Aggregated, multi-repetition results for a single benchmark condition."""
 
@@ -190,6 +224,9 @@ class VLLMConditionResult(BaseModel):
     repetition_count: int = Field(ge=1, description="Number of repetitions aggregated")
     requests: tuple[VLLMBenchmarkRequestRecord, ...] = Field(
         default_factory=tuple, description="Canonical request records from final repetition"
+    )
+    repetition_measurements: tuple[VLLMRepetitionMeasurement, ...] = Field(
+        default_factory=tuple, description="Granular measurement record for each repetition trial"
     )
 
 
@@ -851,6 +888,43 @@ class VLLMValidator:
             total_out = sum(r.output_tokens for r in final_rep.request_results if r.success)
             comp_count = sum(1 for r in final_rep.request_results if r.success)
 
+            rep_measurements: list[VLLMRepetitionMeasurement] = []
+            for rep_idx, r in enumerate(rep_results):
+                r_lats = [req.latency_ms for req in r.request_results if req.success]
+                r_p50 = calculate_percentile(r_lats, 50.0) if r_lats else 0.0
+                r_p95 = calculate_percentile(r_lats, 95.0) if r_lats else 0.0
+                r_p99 = calculate_percentile(r_lats, 99.0) if r_lats else 0.0
+                r_comp = len([req for req in r.request_results if req.success])
+                r_fail = len(r.request_results) - r_comp
+                r_tot_tok = r.total_input_tokens + r.total_output_tokens
+                rep_measurements.append(
+                    VLLMRepetitionMeasurement(
+                        repetition_index=rep_idx + 1,
+                        warmup_count=warmup_count if rep_idx == 0 else 0,
+                        measured_request_count=len(r.request_results),
+                        duration_sec=r.duration_sec,
+                        requests_per_sec=r.requests_per_sec,
+                        output_tokens_per_sec=r.output_tokens_per_sec,
+                        total_tokens_per_sec=(
+                            r_tot_tok / r.duration_sec if r.duration_sec > 0 else 0.0
+                        ),
+                        mean_latency_ms=r.avg_latency_ms,
+                        p50_latency_ms=r_p50,
+                        p95_latency_ms=r_p95,
+                        p99_latency_ms=r_p99,
+                        min_latency_ms=min(r_lats, default=0.0),
+                        max_latency_ms=max(r_lats, default=0.0),
+                        avg_queue_wait_ms=0.0,
+                        avg_backend_execution_ms=r.avg_latency_ms,
+                        total_batches=len(r.request_results),
+                        avg_batch_size=1.0,
+                        completed_requests=r_comp,
+                        failed_requests=r_fail,
+                        integrity_valid=(r_fail == 0),
+                        engine_lifecycle_status="cleaned_up",
+                    )
+                )
+
             return VLLMConditionResult(
                 condition=VLLMCondition.DIRECT_VLLM,
                 condition_label=VLLM_CONDITION_LABELS[VLLMCondition.DIRECT_VLLM],
@@ -900,6 +974,7 @@ class VLLMValidator:
                 avg_batch_execution_ms=avg_mean_lat,
                 repetition_count=repetitions,
                 requests=req_records,
+                repetition_measurements=tuple(rep_measurements),
             )
         finally:
             await runner.unload_model()
@@ -1083,6 +1158,43 @@ class VLLMValidator:
                 eff_size = max(1, round(batch_stats.avg_batch_size))
                 batch_size_dist = {eff_size: batch_stats.total_batches}
 
+            rep_measurements: list[VLLMRepetitionMeasurement] = []
+            for rep_idx, (r_raw, snap) in enumerate(
+                zip(rep_results_raw, rep_snapshots, strict=False)
+            ):
+                r_lats = [resp.latency_ms for resp in r_raw.responses]
+                r_p50 = calculate_percentile(r_lats, 50.0) if r_lats else 0.0
+                r_p95 = calculate_percentile(r_lats, 95.0) if r_lats else 0.0
+                r_p99 = calculate_percentile(r_lats, 99.0) if r_lats else 0.0
+                r_tot_tok = snap.throughput.total_input_tokens + snap.throughput.total_output_tokens
+                rep_measurements.append(
+                    VLLMRepetitionMeasurement(
+                        repetition_index=rep_idx + 1,
+                        warmup_count=warmup_count if rep_idx == 0 else 0,
+                        measured_request_count=len(r_raw.responses),
+                        duration_sec=r_raw.duration_sec,
+                        requests_per_sec=r_raw.requests_per_sec,
+                        output_tokens_per_sec=r_raw.tokens_per_sec,
+                        total_tokens_per_sec=(
+                            r_tot_tok / r_raw.duration_sec if r_raw.duration_sec > 0 else 0.0
+                        ),
+                        mean_latency_ms=snap.requests.avg_total_latency_ms,
+                        p50_latency_ms=r_p50,
+                        p95_latency_ms=r_p95,
+                        p99_latency_ms=r_p99,
+                        min_latency_ms=min(r_lats, default=0.0),
+                        max_latency_ms=max(r_lats, default=0.0),
+                        avg_queue_wait_ms=snap.requests.avg_queue_wait_ms,
+                        avg_backend_execution_ms=snap.requests.avg_execution_ms,
+                        total_batches=snap.batches.total_batches,
+                        avg_batch_size=snap.batches.avg_batch_size,
+                        completed_requests=r_raw.completed_requests,
+                        failed_requests=r_raw.failed_requests,
+                        integrity_valid=(r_raw.failed_requests == 0),
+                        engine_lifecycle_status="cleaned_up",
+                    )
+                )
+
             return VLLMConditionResult(
                 condition=condition,
                 condition_label=label,
@@ -1128,6 +1240,7 @@ class VLLMValidator:
                 avg_batch_execution_ms=batch_stats.avg_batch_execution_ms,
                 repetition_count=repetitions,
                 requests=req_records,
+                repetition_measurements=tuple(rep_measurements),
             )
         finally:
             await backend.unload_model()

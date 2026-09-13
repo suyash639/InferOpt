@@ -18,6 +18,7 @@ from inferopt.benchmarks.step11_experiment import (
     Step11ValidationResult,
 )
 from inferopt.benchmarks.step12_generalization import (
+    CrossWorkloadGeneralizationSummary,
     CrossWorkloadSummaryRow,
     Step12GeneralizationReport,
     Step12GeneralizationRunner,
@@ -33,6 +34,7 @@ from inferopt.benchmarks.vllm_validation import (
     VLLMConditionResult,
     VLLMEnvironmentMetadata,
     VLLMIntegrityResult,
+    VLLMRepetitionMeasurement,
     VLLMValidator,
     compute_workload_hash,
 )
@@ -770,3 +772,208 @@ class TestStep12CLIExtension:
             rc = await run_benchmark_cli(args)
             assert rc == 0
             assert mock_runner.run_experiment.await_count == 1
+
+
+class TestStep12ScientificAuditPass:
+    """Scientific audit tests for repetition traceability, variability, and classifications."""
+
+    def test_repetition_measurement_serialization_and_traceability(self) -> None:
+        """Verify VLLMRepetitionMeasurement records all required raw trace fields."""
+        rep = VLLMRepetitionMeasurement(
+            repetition_index=1,
+            warmup_count=2,
+            measured_request_count=16,
+            duration_sec=1.5,
+            requests_per_sec=10.67,
+            output_tokens_per_sec=213.33,
+            total_tokens_per_sec=320.0,
+            mean_latency_ms=93.75,
+            p50_latency_ms=90.0,
+            p95_latency_ms=110.0,
+            p99_latency_ms=120.0,
+            min_latency_ms=80.0,
+            max_latency_ms=125.0,
+            avg_queue_wait_ms=3.5,
+            avg_backend_execution_ms=90.25,
+            total_batches=8,
+            avg_batch_size=2.0,
+            completed_requests=16,
+            failed_requests=0,
+            integrity_valid=True,
+            engine_lifecycle_status="cleaned_up",
+        )
+        assert rep.repetition_index == 1
+        assert rep.warmup_count == 2
+        assert rep.measured_request_count == 16
+        assert rep.requests_per_sec == 10.67
+        assert rep.p95_latency_ms == 110.0
+        assert rep.p99_latency_ms == 120.0
+        assert rep.avg_queue_wait_ms == 3.5
+        assert rep.avg_backend_execution_ms == 90.25
+        assert rep.total_batches == 8
+        assert rep.avg_batch_size == 2.0
+        assert rep.integrity_valid is True
+        assert rep.engine_lifecycle_status == "cleaned_up"
+
+    def test_candidate_variability_metrics_computation(self) -> None:
+        """Verify candidate result variability metrics (std dev, cv, min, max)."""
+        cand = Step11CandidateResult(
+            config=TunableConfig(max_concurrency=4, max_batch_size=2, batch_wait_ms=50.0),
+            concurrency=4,
+            max_batch_size=2,
+            batch_wait_ms=50.0,
+            repetitions=3,
+            requests_per_sec=10.0,
+            output_tokens_per_sec=200.0,
+            total_tokens_per_sec=300.0,
+            mean_latency_ms=100.0,
+            median_latency_ms=95.0,
+            p50_latency_ms=95.0,
+            p95_latency_ms=120.0,
+            p99_latency_ms=130.0,
+            std_dev_latency_ms=15.0,
+            avg_queue_wait_ms=5.0,
+            avg_backend_execution_ms=95.0,
+            total_batches=8,
+            avg_batch_size=2.0,
+            max_batch_size_formed=2,
+            completed_requests=16,
+            failed_requests=0,
+            integrity_valid=True,
+            repetition_throughputs=(9.5, 10.0, 10.5),
+            repetition_p95_latencies_ms=(115.0, 120.0, 125.0),
+            throughput_std_dev=0.5,
+            throughput_cv=0.05,
+            p95_std_dev_ms=5.0,
+            p95_cv=0.0417,
+            min_throughput=9.5,
+            max_throughput=10.5,
+            min_p95_latency_ms=115.0,
+            max_p95_latency_ms=125.0,
+        )
+        assert cand.throughput_std_dev == 0.5
+        assert cand.throughput_cv == 0.05
+        assert cand.p95_std_dev_ms == 5.0
+        assert cand.min_throughput == 9.5
+        assert cand.max_throughput == 10.5
+        assert cand.min_p95_latency_ms == 115.0
+        assert cand.max_p95_latency_ms == 125.0
+
+    def test_validation_variability_and_delta_tracking(self) -> None:
+        """Verify validation result captures repetition-level scores and throughputs."""
+        val = Step11ValidationResult(
+            objective_type=OptimizationObjectiveType.THROUGHPUT,
+            objective_label="THROUGHPUT",
+            config=TunableConfig(max_concurrency=4, max_batch_size=2, batch_wait_ms=50.0),
+            exploration_score=10.0,
+            validation_score=9.8,
+            score_delta_pct=-2.0,
+            exploration_throughput=10.0,
+            validation_throughput=9.8,
+            throughput_delta_pct=-2.0,
+            exploration_p95_latency_ms=120.0,
+            validation_p95_latency_ms=122.0,
+            p95_latency_delta_pct=1.67,
+            validation_p99_latency_ms=130.0,
+            validation_std_dev_ms=5.0,
+            exploration_repetitions=3,
+            validation_repetitions=3,
+            integrity_valid=True,
+            validation_repetition_scores=(9.6, 9.8, 10.0),
+            validation_repetition_throughputs=(9.6, 9.8, 10.0),
+            validation_repetition_p95_ms=(120.0, 122.0, 124.0),
+            validation_repetition_p99_ms=(130.0, 132.0, 134.0),
+            throughput_std_dev=0.2,
+            throughput_cv=0.0204,
+            p95_std_dev_ms=2.0,
+            p95_cv=0.0164,
+            min_throughput=9.6,
+            max_throughput=10.0,
+            min_p95_latency_ms=120.0,
+            max_p95_latency_ms=124.0,
+        )
+        assert val.validation_repetition_scores == (9.6, 9.8, 10.0)
+        assert val.throughput_cv == 0.0204
+        assert val.p95_cv == 0.0164
+        assert val.min_throughput == 9.6
+        assert val.max_throughput == 10.0
+
+    def test_conservative_generalization_classifications_and_sample_size_flag(self) -> None:
+        """Verify 8-question generalization audit uses conservative evidence framework."""
+        row_a = CrossWorkloadSummaryRow(
+            workload_key="A_LIGHT",
+            workload_name="A (Light)",
+            arrival_pattern="SEQUENTIAL",
+            baseline_rps=1.12,
+            baseline_p95_ms=180.0,
+            tput_winner_config="c=1, b=2",
+            tput_winner_rps=1.45,
+            tput_winner_val_cv=0.035,
+            lat_winner_config="c=1, b=1",
+            lat_winner_p95_ms=180.0,
+            lat_winner_val_cv=0.020,
+            balanced_winner_config="c=1, b=2",
+            balanced_winner_rps=1.45,
+            balanced_winner_p95_ms=210.0,
+            balanced_winner_val_cv=0.035,
+            balanced_val_delta_pct=-1.2,
+            is_stable=True,
+            integrity_valid=True,
+            top3_throughput=(
+                "c=1, b=2 (1.45 req/s)",
+                "c=1, b=4 (1.44 req/s)",
+                "c=1, b=1 (1.12 req/s)",
+            ),
+            top3_latency=("c=1, b=1 (180.00ms)", "c=1, b=2 (210.00ms)", "c=1, b=4 (220.00ms)"),
+            top3_balanced=("c=1, b=2 (0.720)", "c=1, b=1 (0.680)", "c=1, b=4 (0.650)"),
+            repetition_count=3,
+            sample_size_sufficient_for_strong_claim=False,
+        )
+        answers = {
+            "1_objective_differentiation": (
+                "[PROVEN] The optimizer selected distinct configurations."
+            ),
+            "2_validation_reproducibility": (
+                "[SUGGESTED] Independent validation confirmed predictions."
+            ),
+            "3_throughput_winner_consistency": (
+                "[PROVEN] Throughput optimization identified unique configurations."
+            ),
+            "4_latency_winner_behavior": (
+                "[PROVEN] Latency optimization consistently selected configs minimizing queue."
+            ),
+            "5_balanced_tradeoff_behavior": (
+                "[PROVEN] Balanced objective selected sustainable throughput."
+            ),
+            "6_measurement_noise_sensitivity": (
+                "[SUGGESTED] Variability analysis showed low CV but N=3 trials has limited power."
+            ),
+            "7_max_batch_bias_check": (
+                "[PROVEN] Optimizer did not uniformly pick max_batch_size=8."
+            ),
+            "8_batch_avoidance_under_adverse_queueing": (
+                "[PROVEN] Optimizer avoided aggressive batching under adverse queueing."
+            ),
+        }
+        summary = CrossWorkloadGeneralizationSummary(
+            rows=(row_a,),
+            total_workloads=1,
+            candidates_per_workload=12,
+            total_candidate_evaluations=12,
+            distinct_throughput_winners=1,
+            distinct_latency_winners=1,
+            distinct_balanced_winners=1,
+            total_successful_validations=3,
+            total_integrity_failures=0,
+            high_variance_count=0,
+            answers_to_generalization_questions=answers,
+        )
+        findings = classify_step12_findings(summary)
+        assert len(findings["PROVEN"]) > 0
+        assert len(findings["SUGGESTED"]) > 0
+        q_ans = summary.answers_to_generalization_questions
+        assert "[PROVEN]" in q_ans["1_objective_differentiation"]
+        assert "[SUGGESTED]" in q_ans["2_validation_reproducibility"]
+        assert "[SUGGESTED]" in q_ans["6_measurement_noise_sensitivity"]
+
+

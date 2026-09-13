@@ -15,11 +15,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID, VLLMConfig
 from inferopt.benchmarks.models import BenchmarkResult, WorkloadScenario
+from inferopt.benchmarks.vllm_baseline import compute_std_dev
 from inferopt.benchmarks.vllm_validation import (
     VLLMCondition,
     VLLMConditionResult,
     VLLMEnvironmentMetadata,
     VLLMIntegrityResult,
+    VLLMRepetitionMeasurement,
     VLLMValidator,
     collect_vllm_environment_metadata,
     compute_workload_hash,
@@ -27,6 +29,7 @@ from inferopt.benchmarks.vllm_validation import (
 )
 from inferopt.optimizer.engine import DeterministicOptimizer, calculate_objective_score
 from inferopt.optimizer.models import (
+    CandidateEvaluation,
     CandidateSpace,
     ObjectiveConfig,
     OptimizationConstraints,
@@ -76,6 +79,47 @@ class Step11CandidateResult(BaseModel):
     completed_requests: int = Field(ge=0, description="Total requests completed successfully")
     failed_requests: int = Field(ge=0, description="Total requests failed")
     integrity_valid: bool = Field(description="True if candidate run satisfied integrity checks")
+    repetition_measurements: tuple[VLLMRepetitionMeasurement, ...] = Field(
+        default_factory=tuple, description="Granular measurement per repetition"
+    )
+    repetition_throughputs: tuple[float, ...] = Field(
+        default_factory=tuple, description="Throughput per repetition trial"
+    )
+    repetition_p95_latencies_ms: tuple[float, ...] = Field(
+        default_factory=tuple, description="p95 latency per repetition trial"
+    )
+    throughput_std_dev: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Throughput sample standard deviation across repetitions",
+    )
+    throughput_cv: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Throughput coefficient of variation (std_dev / mean)",
+    )
+    p95_std_dev_ms: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="p95 latency sample standard deviation across repetitions",
+    )
+    p95_cv: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="p95 latency coefficient of variation (std_dev / mean)",
+    )
+    min_throughput: float = Field(
+        default=0.0, ge=0.0, description="Minimum throughput across repetitions"
+    )
+    max_throughput: float = Field(
+        default=0.0, ge=0.0, description="Maximum throughput across repetitions"
+    )
+    min_p95_latency_ms: float = Field(
+        default=0.0, ge=0.0, description="Minimum p95 latency across repetitions"
+    )
+    max_p95_latency_ms: float = Field(
+        default=0.0, ge=0.0, description="Maximum p95 latency across repetitions"
+    )
 
 
 class Step11OptimizerDecision(BaseModel):
@@ -96,6 +140,10 @@ class Step11OptimizerDecision(BaseModel):
     )
     total_evaluated: int = Field(ge=1, description="Total candidate configurations evaluated")
     feasible_evaluated: int = Field(ge=1, description="Count of feasible candidates evaluated")
+    top_candidates: tuple[CandidateEvaluation, ...] = Field(
+        default_factory=tuple,
+        description="Top 3 ranked candidate evaluations for this objective",
+    )
 
 
 class Step11ValidationResult(BaseModel):
@@ -144,6 +192,53 @@ class Step11ValidationResult(BaseModel):
         ge=1, description="Repetitions during independent validation"
     )
     integrity_valid: bool = Field(description="True if validation run satisfied integrity checks")
+    repetition_measurements: tuple[VLLMRepetitionMeasurement, ...] = Field(
+        default_factory=tuple, description="Granular measurement per validation repetition"
+    )
+    validation_repetition_scores: tuple[float, ...] = Field(
+        default_factory=tuple, description="Objective score per validation repetition"
+    )
+    validation_repetition_throughputs: tuple[float, ...] = Field(
+        default_factory=tuple, description="Throughput per validation repetition"
+    )
+    validation_repetition_p95_ms: tuple[float, ...] = Field(
+        default_factory=tuple, description="p95 latency per validation repetition"
+    )
+    validation_repetition_p99_ms: tuple[float, ...] = Field(
+        default_factory=tuple, description="p99 latency per validation repetition"
+    )
+    throughput_std_dev: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Validation throughput standard deviation across repetitions",
+    )
+    throughput_cv: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Validation throughput coefficient of variation",
+    )
+    p95_std_dev_ms: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Validation p95 latency standard deviation across repetitions",
+    )
+    p95_cv: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Validation p95 latency coefficient of variation",
+    )
+    min_throughput: float = Field(
+        default=0.0, ge=0.0, description="Minimum validation throughput across repetitions"
+    )
+    max_throughput: float = Field(
+        default=0.0, ge=0.0, description="Maximum validation throughput across repetitions"
+    )
+    min_p95_latency_ms: float = Field(
+        default=0.0, ge=0.0, description="Minimum validation p95 latency across repetitions"
+    )
+    max_p95_latency_ms: float = Field(
+        default=0.0, ge=0.0, description="Maximum validation p95 latency across repetitions"
+    )
 
 
 class Step11ExperimentReport(BaseModel):
@@ -275,6 +370,80 @@ def vllm_condition_to_benchmark_result(
         total_batches=cond.total_batches,
         avg_batch_size=cond.avg_batch_size,
         max_batch_size=cond.max_batch_size_formed,
+    )
+
+
+def _repetition_to_benchmark_result(
+    m: VLLMRepetitionMeasurement,
+    config: TunableConfig,
+    scenario: WorkloadScenario,
+    backend_name: str = "vllm",
+) -> BenchmarkResult:
+    """Convert a VLLMRepetitionMeasurement into a BenchmarkResult for single-repetition scoring."""
+    sched_cfg = SchedulerConfig(
+        max_concurrency=config.max_concurrency,
+        batch_config=BatchConfig(
+            max_batch_size=config.max_batch_size,
+            batch_wait_ms=config.batch_wait_ms,
+        ),
+    )
+    snap = MetricsSnapshot(
+        timestamp=time.time(),
+        requests=RequestStats(
+            total_requests=m.measured_request_count,
+            completed_requests=m.completed_requests,
+            failed_requests=m.failed_requests,
+            avg_total_latency_ms=m.mean_latency_ms,
+            p50_total_latency_ms=m.p50_latency_ms,
+            p95_total_latency_ms=m.p95_latency_ms,
+            p99_total_latency_ms=m.p99_latency_ms,
+            avg_queue_wait_ms=m.avg_queue_wait_ms,
+            avg_execution_ms=m.avg_backend_execution_ms,
+        ),
+        batches=BatchStats(
+            total_batches=m.total_batches,
+            avg_batch_size=m.avg_batch_size,
+            max_batch_size=round(m.avg_batch_size),
+            min_batch_size=1 if m.total_batches > 0 else 0,
+            avg_batch_formation_wait_ms=0.0,
+            avg_batch_execution_ms=m.avg_backend_execution_ms,
+        ),
+        throughput=ThroughputStats(
+            requests_per_sec=m.requests_per_sec,
+            batches_per_sec=(m.total_batches / m.duration_sec if m.duration_sec > 0.0 else 0.0),
+            tokens_per_sec=m.total_tokens_per_sec,
+            total_input_tokens=0,
+            total_output_tokens=0,
+        ),
+    )
+    return BenchmarkResult(
+        benchmark_id=f"bench-val-rep-{uuid.uuid4().hex[:6]}",
+        timestamp=time.time(),
+        scenario_name=scenario.scenario_name,
+        workload_config=scenario.config,
+        backend_name=backend_name,
+        scheduler_config=sched_cfg,
+        batch_config=sched_cfg.batch_config,
+        telemetry_snapshot=snap,
+        duration_sec=m.duration_sec,
+        total_requests=m.measured_request_count,
+        completed_requests=m.completed_requests,
+        failed_requests=m.failed_requests,
+        cancelled_requests=0,
+        requests_per_sec=m.requests_per_sec,
+        batches_per_sec=snap.throughput.batches_per_sec,
+        tokens_per_sec=m.total_tokens_per_sec,
+        avg_latency_ms=m.mean_latency_ms,
+        p50_latency_ms=m.p50_latency_ms,
+        p95_latency_ms=m.p95_latency_ms,
+        p99_latency_ms=m.p99_latency_ms,
+        avg_queue_wait_ms=m.avg_queue_wait_ms,
+        avg_execution_ms=m.avg_backend_execution_ms,
+        peak_queue_depth=config.max_concurrency,
+        peak_active_requests=config.max_concurrency,
+        total_batches=m.total_batches,
+        avg_batch_size=m.avg_batch_size,
+        max_batch_size=round(m.avg_batch_size),
     )
 
 
@@ -622,6 +791,23 @@ class Step11ExperimentRunner:
                 expected_workload_hash=workload_hash,
             )
 
+            rep_tputs = tuple(m.requests_per_sec for m in c_res.repetition_measurements)
+            rep_p95s = tuple(m.p95_latency_ms for m in c_res.repetition_measurements)
+            tput_sd = (
+                compute_std_dev(list(rep_tputs), c_res.requests_per_sec)
+                if len(rep_tputs) > 1
+                else 0.0
+            )
+            tput_cv = (tput_sd / c_res.requests_per_sec) if c_res.requests_per_sec > 0 else 0.0
+            p95_sd = (
+                compute_std_dev(list(rep_p95s), c_res.p95_latency_ms) if len(rep_p95s) > 1 else 0.0
+            )
+            p95_cv = (p95_sd / c_res.p95_latency_ms) if c_res.p95_latency_ms > 0 else 0.0
+            min_tp = min(rep_tputs, default=c_res.requests_per_sec)
+            max_tp = max(rep_tputs, default=c_res.requests_per_sec)
+            min_p95 = min(rep_p95s, default=c_res.p95_latency_ms)
+            max_p95 = max(rep_p95s, default=c_res.p95_latency_ms)
+
             cand_result = Step11CandidateResult(
                 config=cand,
                 concurrency=cand.max_concurrency,
@@ -645,6 +831,17 @@ class Step11ExperimentRunner:
                 completed_requests=c_res.completed_requests,
                 failed_requests=c_res.failed_requests,
                 integrity_valid=c_integrity.is_valid,
+                repetition_measurements=c_res.repetition_measurements,
+                repetition_throughputs=rep_tputs,
+                repetition_p95_latencies_ms=rep_p95s,
+                throughput_std_dev=round(tput_sd, 4),
+                throughput_cv=round(tput_cv, 4),
+                p95_std_dev_ms=round(p95_sd, 2),
+                p95_cv=round(p95_cv, 4),
+                min_throughput=round(min_tp, 4),
+                max_throughput=round(max_tp, 4),
+                min_p95_latency_ms=round(min_p95, 2),
+                max_p95_latency_ms=round(max_p95, 2),
             )
             exploration_results.append(cand_result)
             candidate_map[cand] = cand_result
@@ -695,6 +892,21 @@ class Step11ExperimentRunner:
             expl_metric = candidate_map[sel_config]
             obj_label = obj.objective_type.value
 
+            # Extract top 3 candidates sorted by deterministic tie-breaking hierarchy
+            def tie_breaker_key(ev: CandidateEvaluation) -> tuple[float, float, float, int, int]:
+                p95 = ev.metrics.p95_latency_ms if ev.metrics else 0.0
+                return (
+                    -ev.objective_score,
+                    p95,
+                    ev.config.batch_wait_ms,
+                    ev.config.max_batch_size,
+                    ev.config.max_concurrency,
+                )
+
+            feasible_evals = [e for e in opt_res.evaluations if e.is_feasible]
+            sorted_feasible = sorted(feasible_evals, key=tie_breaker_key)
+            top_3_evals = tuple(sorted_feasible[:3])
+
             dec = Step11OptimizerDecision(
                 objective_type=obj.objective_type,
                 objective_label=obj_label,
@@ -705,6 +917,7 @@ class Step11ExperimentRunner:
                 exploration_metrics=expl_metric,
                 total_evaluated=opt_res.total_candidates,
                 feasible_evaluated=opt_res.feasible_candidates,
+                top_candidates=top_3_evals,
             )
             decisions[obj_label] = dec
 
@@ -757,9 +970,45 @@ class Step11ExperimentRunner:
 
             expl_metric = candidate_map[sel_config]
 
+            val_rep_tputs = tuple(m.requests_per_sec for m in val_cond_res.repetition_measurements)
+            val_rep_p95s = tuple(m.p95_latency_ms for m in val_cond_res.repetition_measurements)
+            val_rep_p99s = tuple(m.p99_latency_ms for m in val_cond_res.repetition_measurements)
+
+            val_tput_sd = (
+                compute_std_dev(list(val_rep_tputs), val_cond_res.requests_per_sec)
+                if len(val_rep_tputs) > 1
+                else 0.0
+            )
+            val_tput_cv = (
+                (val_tput_sd / val_cond_res.requests_per_sec)
+                if val_cond_res.requests_per_sec > 0
+                else 0.0
+            )
+            val_p95_sd = (
+                compute_std_dev(list(val_rep_p95s), val_cond_res.p95_latency_ms)
+                if len(val_rep_p95s) > 1
+                else 0.0
+            )
+            val_p95_cv = (
+                (val_p95_sd / val_cond_res.p95_latency_ms)
+                if val_cond_res.p95_latency_ms > 0
+                else 0.0
+            )
+            val_min_tp = min(val_rep_tputs, default=val_cond_res.requests_per_sec)
+            val_max_tp = max(val_rep_tputs, default=val_cond_res.requests_per_sec)
+            val_min_p95 = min(val_rep_p95s, default=val_cond_res.p95_latency_ms)
+            val_max_p95 = max(val_rep_p95s, default=val_cond_res.p95_latency_ms)
+
             for obj_type, obj_label, obj_cfg in obj_list:
                 val_score, _ = calculate_objective_score(val_bench_res, obj_cfg)
                 expl_score = decisions[obj_label].predicted_score
+
+                # Calculate individual validation repetition scores
+                val_rep_scores: list[float] = []
+                for m in val_cond_res.repetition_measurements:
+                    b_res = _repetition_to_benchmark_result(m, sel_config, scenario)
+                    sc, _ = calculate_objective_score(b_res, obj_cfg)
+                    val_rep_scores.append(sc)
 
                 score_delta_pct = (
                     ((val_score - expl_score) / abs(expl_score) * 100.0)
@@ -804,6 +1053,19 @@ class Step11ExperimentRunner:
                         exploration_repetitions=exploration_repetitions,
                         validation_repetitions=validation_repetitions,
                         integrity_valid=val_integrity.is_valid,
+                        repetition_measurements=val_cond_res.repetition_measurements,
+                        validation_repetition_scores=tuple(val_rep_scores),
+                        validation_repetition_throughputs=val_rep_tputs,
+                        validation_repetition_p95_ms=val_rep_p95s,
+                        validation_repetition_p99_ms=val_rep_p99s,
+                        throughput_std_dev=round(val_tput_sd, 4),
+                        throughput_cv=round(val_tput_cv, 4),
+                        p95_std_dev_ms=round(val_p95_sd, 2),
+                        p95_cv=round(val_p95_cv, 4),
+                        min_throughput=round(val_min_tp, 4),
+                        max_throughput=round(val_max_tp, 4),
+                        min_p95_latency_ms=round(val_min_p95, 2),
+                        max_p95_latency_ms=round(val_max_p95, 2),
                     )
                 )
 
