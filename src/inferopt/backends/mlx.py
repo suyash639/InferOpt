@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import time
+import uuid
 from typing import Any, Final
 
 from inferopt.backends.base import BatchInferenceBackend, InferenceBackend
@@ -50,11 +51,52 @@ class MLXBackend(InferenceBackend, BatchInferenceBackend):
         self._model: Any = None
         self._tokenizer: Any = None
         self._lock = asyncio.Lock()
+        self._instance_id = f"mlx-{uuid.uuid4().hex[:8]}"
+        self._engine_initializations = 0
+        self._engine_teardowns = 0
+        self._generate_calls = 0
+        self._generate_batch_calls = 0
+        self._total_requests_executed = 0
 
     @property
     def backend_name(self) -> str:
         """Unique identifier representing this backend."""
         return BACKEND_NAME
+
+    @property
+    def instance_id(self) -> str:
+        """Unique instance identifier for this backend engine."""
+        return self._instance_id
+
+    @property
+    def engine_initializations(self) -> int:
+        """Count of engine initializations/loads performed by this backend."""
+        return self._engine_initializations
+
+    @property
+    def engine_teardowns(self) -> int:
+        """Count of engine teardowns/unloads performed by this backend."""
+        return self._engine_teardowns
+
+    @property
+    def generate_calls(self) -> int:
+        """Total number of single-request generate calls executed."""
+        return self._generate_calls
+
+    @property
+    def generate_batch_calls(self) -> int:
+        """Total number of batched generate_batch calls executed."""
+        return self._generate_batch_calls
+
+    @property
+    def total_requests_executed(self) -> int:
+        """Total requests executed across single and batched generate calls."""
+        return self._total_requests_executed
+
+    @property
+    def is_real_execution(self) -> bool:
+        """True if backend executes on real model weights/hardware, False if mock."""
+        return True
 
     @property
     def model_id(self) -> str:
@@ -114,6 +156,7 @@ class MLXBackend(InferenceBackend, BatchInferenceBackend):
                     ) from exc
 
             self._model, self._tokenizer = await asyncio.to_thread(_load_sync)
+            self._engine_initializations += 1
 
     async def unload_model(self) -> None:
         """Release loaded model and tokenizer resources from memory."""
@@ -127,6 +170,7 @@ class MLXBackend(InferenceBackend, BatchInferenceBackend):
                     mx.metal.clear_cache()
             except ImportError:
                 pass
+            self._engine_teardowns += 1
 
     async def generate(self, request: InferenceRequest) -> InferenceResponse:
         """Execute a single inference generation request on Apple Silicon.
@@ -142,6 +186,8 @@ class MLXBackend(InferenceBackend, BatchInferenceBackend):
             BackendError: If MLX is not installed or model fails to load.
         """
         await self.load_model()
+        self._generate_calls += 1
+        self._total_requests_executed += 1
 
         max_tokens = request.max_tokens if request.max_tokens > 0 else self._default_max_tokens
         temperature = (
@@ -228,6 +274,8 @@ class MLXBackend(InferenceBackend, BatchInferenceBackend):
             BackendError: If MLX is not installed or model fails to load.
         """
         await self.load_model()
+        self._generate_batch_calls += 1
+        self._total_requests_executed += len(batch.requests)
 
         def _batch_generate_sync() -> list[tuple[str, int, int, float]]:
             try:

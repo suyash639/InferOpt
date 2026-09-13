@@ -153,6 +153,12 @@ class MetricsCollector:
         with self._lock:
             return tuple(self._adaptations[-limit:])
 
+    def reset_peaks(self) -> None:
+        """Reset peak high-water marks for queue depth and active concurrency to current values."""
+        with self._lock:
+            self._peak_queue_depth = self._current_queue_depth
+            self._peak_active_requests = self._current_active_requests
+
     def reset(self) -> None:
         """Reset all recorded metrics, peaks, and observation counters."""
         with self._lock:

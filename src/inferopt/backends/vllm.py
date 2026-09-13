@@ -184,11 +184,52 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
         self._model_load_time_ms: float = 0.0
         self._lock = asyncio.Lock()
         self._executor: ThreadPoolExecutor | None = None
+        self._instance_id = f"vllm-{uuid.uuid4().hex[:8]}"
+        self._engine_initializations = 0
+        self._engine_teardowns = 0
+        self._generate_calls = 0
+        self._generate_batch_calls = 0
+        self._total_requests_executed = 0
 
     @property
     def backend_name(self) -> str:
         """Unique identifier representing this backend engine."""
         return BACKEND_NAME
+
+    @property
+    def instance_id(self) -> str:
+        """Unique instance identifier for this backend engine."""
+        return self._instance_id
+
+    @property
+    def engine_initializations(self) -> int:
+        """Count of engine initializations/loads performed by this backend."""
+        return self._engine_initializations
+
+    @property
+    def engine_teardowns(self) -> int:
+        """Count of engine teardowns/unloads performed by this backend."""
+        return self._engine_teardowns
+
+    @property
+    def generate_calls(self) -> int:
+        """Total number of single-request generate calls executed."""
+        return self._generate_calls
+
+    @property
+    def generate_batch_calls(self) -> int:
+        """Total number of batched generate_batch calls executed."""
+        return self._generate_batch_calls
+
+    @property
+    def total_requests_executed(self) -> int:
+        """Total requests executed across single and batched generate calls."""
+        return self._total_requests_executed
+
+    @property
+    def is_real_execution(self) -> bool:
+        """True if backend executes on real model weights/hardware, False if mock."""
+        return True
 
     @property
     def config(self) -> VLLMConfig:
@@ -282,6 +323,7 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
             self._llm, self._model_load_time_ms = await loop.run_in_executor(
                 self._executor, _load_sync
             )
+            self._engine_initializations += 1
 
     async def unload_model(self) -> None:
         """Safely and deterministically release the initialized vLLM engine from GPU memory."""
@@ -302,6 +344,7 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
                 executor.shutdown(wait=True)
             else:
                 cleanup_vllm_engine(llm_to_clean)
+            self._engine_teardowns += 1
 
     def _build_sampling_params(
         self,
@@ -341,6 +384,8 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
             BackendError: If vLLM dependencies are missing or engine initialization fails.
         """
         await self.load_model()
+        self._generate_calls += 1
+        self._total_requests_executed += 1
 
         temperature = (
             request.temperature if request.temperature >= 0.0 else self._config.default_temperature
@@ -428,6 +473,8 @@ class VLLMBackend(InferenceBackend, BatchInferenceBackend):
             BackendError: If vLLM dependencies are missing or engine initialization fails.
         """
         await self.load_model()
+        self._generate_batch_calls += 1
+        self._total_requests_executed += len(batch.requests)
 
         prompts: list[str] = [req.prompt for req in batch.requests]
         sampling_params_list: list[Any] = []

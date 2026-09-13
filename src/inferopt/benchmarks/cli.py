@@ -94,8 +94,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--backend",
         choices=["mock", "mlx", "vllm"],
-        default="mock",
-        help="Inference backend implementation to evaluate (default: mock).",
+        default=None,
+        help="Inference backend implementation to evaluate "
+        "(default: vllm for Step 10-13, mock otherwise).",
     )
     parser.add_argument(
         "--model",
@@ -227,15 +228,17 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
         print(f"  Output Path:         {out_path}")
         print("=" * 80 + "\n")
 
+        backend_choice = args.backend if args.backend is not None else "vllm"
+
         backend_inst: InferenceBackend
-        if args.backend == "vllm":
+        if backend_choice == "vllm":
             backend_inst = VLLMBackend(
                 config=VLLMConfig(
                     model=model_id,
                     enforce_eager=args.enforce_eager,
                 )
             )
-        elif args.backend == "mlx":
+        elif backend_choice == "mlx":
             from inferopt.backends.mlx import DEFAULT_MODEL_ID as DEFAULT_MLX_MODEL_ID
             from inferopt.backends.mlx import MLXBackend
 
@@ -248,11 +251,18 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
             enforce_eager=args.enforce_eager,
         )
 
-        report_step13 = await runner_step13.run_experiment(
-            backend=backend_inst,
-            num_requests_per_phase=num_reqs,
-            seed=args.seed,
-        )
+        try:
+            if hasattr(backend_inst, "load_model"):
+                await backend_inst.load_model()
+
+            report_step13 = await runner_step13.run_experiment(
+                backend=backend_inst,
+                num_requests_per_phase=num_reqs,
+                seed=args.seed,
+            )
+        finally:
+            if hasattr(backend_inst, "unload_model"):
+                await backend_inst.unload_model()
 
         print()
         print(format_step13_report(report_step13))

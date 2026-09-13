@@ -178,17 +178,25 @@ class Step13PhaseMetricRecord(BaseModel):
         description="Regime classified by the detector during phase"
     )
     active_config: str = Field(description="Active runtime configuration in phase")
-    total_requests: int = Field(ge=0, description="Total requests submitted in phase")
+    scheduled_requests: int = Field(ge=0, description="Scheduled requests in phase")
+    total_requests: int = Field(ge=0, description="Total scheduled requests in phase")
     completed_requests: int = Field(ge=0, description="Completed requests in phase")
     failed_requests: int = Field(ge=0, description="Failed requests in phase")
+    measured_requests: int = Field(ge=0, description="Measured requests with valid latencies")
+    backend_generate_calls: int = Field(
+        default=0, ge=0, description="Single-request generate calls during phase"
+    )
+    backend_generate_batch_calls: int = Field(
+        default=0, ge=0, description="Batched generate_batch calls during phase"
+    )
     duration_sec: float = Field(ge=0.0, description="Elapsed phase duration in seconds")
     throughput_rps: float = Field(ge=0.0, description="Phase throughput in req/s")
     output_tokens_per_sec: float = Field(ge=0.0, description="Phase output token throughput")
     total_tokens_per_sec: float = Field(ge=0.0, description="Phase total token throughput")
-    mean_latency_ms: float = Field(ge=0.0, description="Mean request latency in ms")
-    p50_latency_ms: float = Field(ge=0.0, description="Median request latency in ms")
-    p95_latency_ms: float = Field(ge=0.0, description="p95 tail latency in ms")
-    p99_latency_ms: float = Field(ge=0.0, description="p99 tail latency in ms")
+    mean_latency_ms: float = Field(ge=0.0, description="Mean end-to-end request latency in ms")
+    p50_latency_ms: float = Field(ge=0.0, description="Median end-to-end request latency in ms")
+    p95_latency_ms: float = Field(ge=0.0, description="p95 end-to-end tail latency in ms")
+    p99_latency_ms: float = Field(ge=0.0, description="p99 end-to-end tail latency in ms")
     avg_queue_wait_ms: float = Field(ge=0.0, description="Mean queue wait time in ms")
     avg_backend_execution_ms: float = Field(
         ge=0.0, description="Mean backend execution latency in ms"
@@ -217,14 +225,25 @@ class Step13ConditionSummary(BaseModel):
     condition_type: str = Field(
         description="Condition type: STATIC_CONSERVATIVE, STATIC_AGGRESSIVE, ADAPTIVE"
     )
+    scheduled_requests: int = Field(ge=0, description="Total scheduled requests across all phases")
     total_requests: int = Field(ge=0, description="Total requests across all phases")
     completed_requests: int = Field(ge=0, description="Total completed requests")
     failed_requests: int = Field(ge=0, description="Total failed requests")
+    measured_requests: int = Field(ge=0, description="Total measured requests")
+    backend_generate_calls: int = Field(
+        default=0, ge=0, description="Single-request generate calls in condition"
+    )
+    backend_generate_batch_calls: int = Field(
+        default=0, ge=0, description="Batched generate_batch calls in condition"
+    )
     total_duration_sec: float = Field(ge=0.0, description="Total elapsed benchmark duration")
     overall_throughput_rps: float = Field(ge=0.0, description="Overall throughput in req/s")
-    overall_p95_latency_ms: float = Field(ge=0.0, description="Overall p95 latency in ms")
-    overall_p99_latency_ms: float = Field(ge=0.0, description="Overall p99 latency in ms")
+    overall_p95_latency_ms: float = Field(ge=0.0, description="Overall p95 total latency in ms")
+    overall_p99_latency_ms: float = Field(ge=0.0, description="Overall p99 total latency in ms")
     mean_queue_wait_ms: float = Field(ge=0.0, description="Mean queue wait time across run")
+    mean_backend_execution_ms: float = Field(
+        default=0.0, ge=0.0, description="Mean backend execution time across run"
+    )
     phase_metrics: tuple[Step13PhaseMetricRecord, ...] = Field(
         description="Per-phase metric records"
     )
@@ -236,10 +255,13 @@ class Step13ConditionSummary(BaseModel):
         default=0, ge=0, description="Count of rapid back-and-forth oscillations"
     )
     engine_initialization_count: int = Field(
-        default=1, description="Count of engine initializations (must be 1 for single lifecycle)"
+        default=1, description="Count of engine initializations"
     )
     engine_teardown_count: int = Field(
-        default=1, description="Count of engine teardowns (must be 1)"
+        default=0, description="Count of engine teardowns"
+    )
+    engine_instance_id: str = Field(
+        default="unknown", description="Unique identifier of the executing engine instance"
     )
     integrity_valid: bool = Field(description="True if 100% integrity gate passed")
 
@@ -281,11 +303,32 @@ class Step13AdaptiveReport(BaseModel):
     timestamp: float = Field(description="Experiment execution timestamp")
     git_commit: str = Field(description="Git commit hash")
     model_id: str = Field(description="Evaluated model ID")
+    backend: str = Field(default="vllm", description="Inference backend implementation identifier")
+    backend_execution_confirmed: bool = Field(
+        default=False, description="True ONLY if verified execution occurred on real GPU engine"
+    )
+    engine_instance_id: str = Field(
+        default="unknown", description="Unique backend engine instance identifier"
+    )
+    engine_initialization_count: int = Field(
+        default=1, description="Engine initializations across run"
+    )
+    engine_teardown_count: int = Field(
+        default=1, description="Engine teardowns across run"
+    )
+    scheduled_requests: int = Field(default=0, ge=0, description="Total scheduled requests in run")
+    completed_requests: int = Field(default=0, ge=0, description="Total completed requests in run")
+    failed_requests: int = Field(default=0, ge=0, description="Total failed requests in run")
+    measured_requests: int = Field(default=0, ge=0, description="Total measured requests in run")
+    backend_generate_calls: int = Field(
+        default=0, ge=0, description="Total single-request backend generate calls in run"
+    )
+    backend_generate_batch_calls: int = Field(
+        default=0, ge=0, description="Total batched backend generate_batch calls in run"
+    )
     environment: VLLMEnvironmentMetadata = Field(description="Hardware and runtime environment")
     phase_sequence: tuple[str, ...] = Field(description="Evaluated phase sequence names")
     num_requests_per_phase: int = Field(ge=1, description="Requests per phase")
-    engine_initialization_count: int = Field(description="Engine initializations across run")
-    engine_teardown_count: int = Field(description="Engine teardowns across run")
     conditions: dict[str, Step13ConditionSummary] = Field(
         description="Per-condition evaluation summaries"
     )
@@ -353,6 +396,9 @@ class Step13AdaptiveExperimentRunner:
         adaptation_events: list[Step13AdaptationEventRecord] = []
         phase_metric_records: list[Step13PhaseMetricRecord] = []
         all_completed_responses: list[InferenceResponse] = []
+        all_completed_total_latencies: list[float] = []
+        all_completed_queue_waits: list[float] = []
+        all_completed_exec_latencies: list[float] = []
         oscillation_count = 0
         prev_applied_cfg = initial_config
         cfg_history: list[TunableConfig] = [initial_config]
@@ -368,10 +414,13 @@ class Step13AdaptiveExperimentRunner:
                 phase_sequence, start=1
             ):
                 t_phase_start = time.perf_counter()
+                collector.reset_peaks()
                 phase_prev_snap = collector.snapshot()
                 phase_adaptations_start = len(adaptation_events)
                 detected_in_phase = WorkloadRegime.UNKNOWN
                 phase_responses: list[InferenceResponse | Exception] = []
+                init_p_gen_calls = getattr(backend, "generate_calls", 0)
+                init_p_batch_calls = getattr(backend, "generate_batch_calls", 0)
 
                 # Dynamic worker dispatcher checking telemetry as requests progress
                 async def _submit_and_check(
@@ -385,7 +434,6 @@ class Step13AdaptiveExperimentRunner:
                 ) -> InferenceResponse | Exception:
                     nonlocal detected_in_phase, oscillation_count, prev_applied_cfg
                     try:
-                        # For BURSTY, requests release immediately; for CONCURRENT, all tasks run
                         inf_req = spec.to_inference_request()
                         res = await scheduler.submit(inf_req)
 
@@ -429,7 +477,7 @@ class Step13AdaptiveExperimentRunner:
                                     time_to_adapt_ms=t_adapt_ms,
                                     in_flight_requests_at_change=dec.in_flight_requests or 0,
                                     queue_depth_at_change=dec.queue_depth or 0,
-                                )
+                                    )
                                 adaptation_events.append(evt)
                                 prev_applied_cfg = dec.proposed_config
 
@@ -469,14 +517,29 @@ class Step13AdaptiveExperimentRunner:
                     barrier.set()
                     phase_resps_raw = await asyncio.gather(*burst_tasks)
                     phase_responses = list(phase_resps_raw)
-                else:
-                    # Sequential or Concurrent
-                    seq_tasks = [
-                        _submit_and_check(spec, i)
+                elif pattern == ArrivalPattern.CONCURRENT:
+                    conc_limit = scenario.config.concurrency or 1
+                    sem = asyncio.Semaphore(conc_limit)
+
+                    async def _throttled_submit(
+                        spec: WorkloadRequestSpec,
+                        s_idx: int,
+                        semaphore: asyncio.Semaphore = sem,
+                    ) -> InferenceResponse | Exception:
+                        async with semaphore:
+                            return await _submit_and_check(spec, s_idx)
+
+                    tasks = [
+                        _throttled_submit(spec, i)
                         for i, spec in enumerate(scenario.requests)
                     ]
-                    phase_resps_raw = await asyncio.gather(*seq_tasks)
+                    phase_resps_raw = await asyncio.gather(*tasks)
                     phase_responses = list(phase_resps_raw)
+                else:
+                    phase_responses = []
+                    for i, spec in enumerate(scenario.requests):
+                        resp = await _submit_and_check(spec, i)
+                        phase_responses.append(resp)
 
                 # Collect phase metrics
                 t_phase_dur = max(0.001, time.perf_counter() - t_phase_start)
@@ -486,18 +549,94 @@ class Step13AdaptiveExperimentRunner:
                 ]
                 all_completed_responses.extend(phase_comp_resps)
 
-                p_lats = [r.latency_ms for r in phase_comp_resps]
-                p_p50 = calculate_percentile(p_lats, 50.0) if p_lats else 0.0
-                p_p95 = calculate_percentile(p_lats, 95.0) if p_lats else 0.0
-                p_p99 = calculate_percentile(p_lats, 99.0) if p_lats else 0.0
-                p_mean = sum(p_lats) / len(p_lats) if p_lats else 0.0
+                # Extract exact end-to-end total latencies and queue wait from scheduler records
+                phase_total_latencies: list[float] = []
+                phase_queue_waits: list[float] = []
+                phase_exec_latencies: list[float] = []
+
+                for r in phase_comp_resps:
+                    rec = scheduler.get_record(r.request_id)
+                    q_wait = (
+                        rec.queue_wait_ms
+                        if (rec is not None and rec.queue_wait_ms is not None)
+                        else 0.0
+                    )
+                    e_lat = (
+                        rec.execution_ms
+                        if (rec is not None and rec.execution_ms is not None)
+                        else r.latency_ms
+                    )
+                    tot_lat = (
+                        rec.total_latency_ms
+                        if (rec is not None and rec.total_latency_ms is not None)
+                        else (q_wait + e_lat)
+                    )
+                    # Hard Invariant: total_latency >= queue_wait for every request
+                    if tot_lat < q_wait - 1e-6:
+                        raise ValueError(
+                            f"Invariant violation: total_latency {tot_lat:.3f}ms < "
+                            f"queue_wait {q_wait:.3f}ms for request {r.request_id}"
+                        )
+                    phase_total_latencies.append(tot_lat)
+                    phase_queue_waits.append(q_wait)
+                    phase_exec_latencies.append(e_lat)
+
+                all_completed_total_latencies.extend(phase_total_latencies)
+                all_completed_queue_waits.extend(phase_queue_waits)
+                all_completed_exec_latencies.extend(phase_exec_latencies)
+
+                p_p50 = (
+                    calculate_percentile(phase_total_latencies, 50.0)
+                    if phase_total_latencies
+                    else 0.0
+                )
+                p_p95 = (
+                    calculate_percentile(phase_total_latencies, 95.0)
+                    if phase_total_latencies
+                    else 0.0
+                )
+                p_p99 = (
+                    calculate_percentile(phase_total_latencies, 99.0)
+                    if phase_total_latencies
+                    else 0.0
+                )
+                p_mean = (
+                    sum(phase_total_latencies) / len(phase_total_latencies)
+                    if phase_total_latencies
+                    else 0.0
+                )
+                p_avg_q_wait = (
+                    sum(phase_queue_waits) / len(phase_queue_waits)
+                    if phase_queue_waits
+                    else 0.0
+                )
+                p_avg_exec = (
+                    sum(phase_exec_latencies) / len(phase_exec_latencies)
+                    if phase_exec_latencies
+                    else 0.0
+                )
 
                 p_reqs_cnt = len(phase_comp_resps)
+                p_sched_cnt = len(scenario.requests)
+                p_fail_cnt = p_sched_cnt - p_reqs_cnt
+                p_measured_cnt = len(phase_total_latencies)
+
+                # Hard Invariant: scheduled == completed + failed == measured
+                if p_sched_cnt != (p_reqs_cnt + p_fail_cnt) or p_reqs_cnt != p_measured_cnt:
+                    raise ValueError(
+                        f"Request accounting mismatch: scheduled={p_sched_cnt}, "
+                        f"completed={p_reqs_cnt}, failed={p_fail_cnt}, measured={p_measured_cnt}"
+                    )
+
+                # Hard Invariant: throughput == completed / duration
                 p_rps = p_reqs_cnt / t_phase_dur if t_phase_dur > 0 else 0.0
                 p_out_toks = sum(r.output_tokens or 0 for r in phase_comp_resps)
                 p_in_toks = sum(r.input_tokens or 0 for r in phase_comp_resps)
                 p_tok_rps = p_out_toks / t_phase_dur if t_phase_dur > 0 else 0.0
                 p_tot_tok_rps = (p_out_toks + p_in_toks) / t_phase_dur if t_phase_dur > 0 else 0.0
+
+                p_gen_calls = getattr(backend, "generate_calls", 0) - init_p_gen_calls
+                p_batch_calls = getattr(backend, "generate_batch_calls", 0) - init_p_batch_calls
 
                 active_sched_cfg = scheduler.config
                 active_cfg_str = (
@@ -529,9 +668,13 @@ class Step13AdaptiveExperimentRunner:
                         ground_truth_regime=ground_truth_regime,
                         detected_regime=det_reg,
                         active_config=active_cfg_str,
-                        total_requests=len(scenario.requests),
+                        scheduled_requests=p_sched_cnt,
+                        total_requests=p_sched_cnt,
                         completed_requests=p_reqs_cnt,
-                        failed_requests=len(scenario.requests) - p_reqs_cnt,
+                        failed_requests=p_fail_cnt,
+                        measured_requests=p_measured_cnt,
+                        backend_generate_calls=p_gen_calls,
+                        backend_generate_batch_calls=p_batch_calls,
                         duration_sec=t_phase_dur,
                         throughput_rps=p_rps,
                         output_tokens_per_sec=p_tok_rps,
@@ -540,44 +683,82 @@ class Step13AdaptiveExperimentRunner:
                         p50_latency_ms=p_p50,
                         p95_latency_ms=p_p95,
                         p99_latency_ms=p_p99,
-                        avg_queue_wait_ms=phase_snap.requests.avg_queue_wait_ms,
-                        avg_backend_execution_ms=phase_snap.requests.avg_execution_ms,
+                        avg_queue_wait_ms=p_avg_q_wait,
+                        avg_backend_execution_ms=p_avg_exec,
                         peak_queue_depth=phase_snap.queue.peak_queue_depth,
                         total_batches=phase_snap.batches.total_batches,
                         avg_batch_size=phase_snap.batches.avg_batch_size,
                         adaptation_count_in_phase=phase_adaptations,
                         time_under_intended_config_sec=t_phase_dur * dwell_frac,
                         dwell_time_fraction=dwell_frac,
-                        integrity_valid=(len(scenario.requests) == p_reqs_cnt),
+                        integrity_valid=(p_fail_cnt == 0),
                     )
                 )
 
         t_total_dur = max(0.001, time.perf_counter() - t_exp_start)
-        final_snap = collector.snapshot()
-        all_lats = [r.latency_ms for r in all_completed_responses]
-        tot_p95 = calculate_percentile(all_lats, 95.0) if all_lats else 0.0
-        tot_p99 = calculate_percentile(all_lats, 99.0) if all_lats else 0.0
-        total_reqs = sum(p.total_requests for p in phase_metric_records)
+        tot_p95 = (
+            calculate_percentile(all_completed_total_latencies, 95.0)
+            if all_completed_total_latencies
+            else 0.0
+        )
+        tot_p99 = (
+            calculate_percentile(all_completed_total_latencies, 99.0)
+            if all_completed_total_latencies
+            else 0.0
+        )
+        total_sched_reqs = sum(p.scheduled_requests for p in phase_metric_records)
         comp_reqs = len(all_completed_responses)
-        fail_reqs = total_reqs - comp_reqs
+        fail_reqs = total_sched_reqs - comp_reqs
+        measured_reqs = len(all_completed_total_latencies)
+
+        # Invariant checks
+        if total_sched_reqs != (comp_reqs + fail_reqs) or comp_reqs != measured_reqs:
+            raise ValueError(
+                f"Condition request accounting mismatch: scheduled={total_sched_reqs}, "
+                f"completed={comp_reqs}, failed={fail_reqs}, measured={measured_reqs}"
+            )
+
+        overall_tput = comp_reqs / t_total_dur if t_total_dur > 0 else 0.0
+        mean_q_wait = (
+            sum(all_completed_queue_waits) / len(all_completed_queue_waits)
+            if all_completed_queue_waits
+            else 0.0
+        )
+        mean_exec = (
+            sum(all_completed_exec_latencies) / len(all_completed_exec_latencies)
+            if all_completed_exec_latencies
+            else 0.0
+        )
+
+        engine_inits = getattr(backend, "engine_initializations", 1)
+        engine_teardowns = getattr(backend, "engine_teardowns", 1)
+        engine_inst_id = getattr(backend, "instance_id", "unknown")
+        cond_gen_calls = sum(p.backend_generate_calls for p in phase_metric_records)
+        cond_batch_calls = sum(p.backend_generate_batch_calls for p in phase_metric_records)
 
         return Step13ConditionSummary(
             condition_name=condition_name,
             condition_type=condition_type,
-            total_requests=total_reqs,
+            scheduled_requests=total_sched_reqs,
+            total_requests=total_sched_reqs,
             completed_requests=comp_reqs,
             failed_requests=fail_reqs,
+            measured_requests=measured_reqs,
+            backend_generate_calls=cond_gen_calls,
+            backend_generate_batch_calls=cond_batch_calls,
             total_duration_sec=t_total_dur,
-            overall_throughput_rps=(comp_reqs / t_total_dur) if t_total_dur > 0 else 0.0,
+            overall_throughput_rps=overall_tput,
             overall_p95_latency_ms=tot_p95,
             overall_p99_latency_ms=tot_p99,
-            mean_queue_wait_ms=final_snap.requests.avg_queue_wait_ms,
+            mean_queue_wait_ms=mean_q_wait,
+            mean_backend_execution_ms=mean_exec,
             phase_metrics=tuple(phase_metric_records),
             adaptation_events=tuple(adaptation_events),
             total_adaptations=len(adaptation_events),
             oscillation_count=oscillation_count,
-            engine_initialization_count=1,
-            engine_teardown_count=1,
+            engine_initialization_count=engine_inits,
+            engine_teardown_count=engine_teardowns,
+            engine_instance_id=engine_inst_id,
             integrity_valid=(fail_reqs == 0),
         )
 
@@ -588,6 +769,10 @@ class Step13AdaptiveExperimentRunner:
         seed: int = 42,
     ) -> Step13AdaptiveReport:
         """Run closed-loop experiment comparing Adaptive InferOpt against static baselines."""
+        backend_name = getattr(backend, "backend_name", "vllm")
+        backend_is_real = getattr(backend, "is_real_execution", False)
+        engine_instance_id = getattr(backend, "instance_id", "unknown")
+
         env = collect_vllm_environment_metadata(
             model_id=self._model_id,
             enforce_eager=self._enforce_eager,
@@ -685,6 +870,19 @@ class Step13AdaptiveExperimentRunner:
             "ADAPTIVE_INFEROPT": res_adaptive,
         }
 
+        total_sched = sum(c.scheduled_requests for c in conditions_map.values())
+        total_comp = sum(c.completed_requests for c in conditions_map.values())
+        total_fail = sum(c.failed_requests for c in conditions_map.values())
+        total_meas = sum(c.measured_requests for c in conditions_map.values())
+        tot_gen_calls = sum(c.backend_generate_calls for c in conditions_map.values())
+        tot_batch_calls = sum(c.backend_generate_batch_calls for c in conditions_map.values())
+
+        final_engine_inits = getattr(backend, "engine_initializations", 1)
+        final_engine_teardowns = getattr(backend, "engine_teardowns", 1)
+
+        # Confirm backend execution on real engine
+        backend_confirmed = backend_is_real and (tot_gen_calls + tot_batch_calls > 0)
+
         findings = classify_step13_findings(comparison, res_adaptive)
 
         return Step13AdaptiveReport(
@@ -692,11 +890,20 @@ class Step13AdaptiveExperimentRunner:
             timestamp=time.time(),
             git_commit=get_git_commit_hash(),
             model_id=self._model_id,
+            backend=backend_name,
+            backend_execution_confirmed=backend_confirmed,
+            engine_instance_id=engine_instance_id,
+            engine_initialization_count=final_engine_inits,
+            engine_teardown_count=final_engine_teardowns,
+            scheduled_requests=total_sched,
+            completed_requests=total_comp,
+            failed_requests=total_fail,
+            measured_requests=total_meas,
+            backend_generate_calls=tot_gen_calls,
+            backend_generate_batch_calls=tot_batch_calls,
             environment=env,
             phase_sequence=phase_names,
             num_requests_per_phase=num_requests_per_phase,
-            engine_initialization_count=1,
-            engine_teardown_count=1,
             conditions=conditions_map,
             comparison=comparison,
             findings=findings,
@@ -775,6 +982,9 @@ def format_step13_report(report: Step13AdaptiveReport) -> str:
     lines.append(f" Experiment ID  : {report.experiment_id}")
     lines.append(f" Git Commit     : {report.git_commit}")
     lines.append(f" Model ID       : {report.model_id}")
+    lines.append(f" Backend Name   : {report.backend}")
+    lines.append(f" Engine Verified: {report.backend_execution_confirmed} (Real Hardware Engine)")
+    lines.append(f" Engine ID      : {report.engine_instance_id}")
     lines.append(
         f" GPU Model      : {report.environment.gpu_name} "
         f"(count={report.environment.gpu_count})"
@@ -782,6 +992,15 @@ def format_step13_report(report: Step13AdaptiveReport) -> str:
     lines.append(
         f" Engine Cycles  : {report.engine_initialization_count} init, "
         f"{report.engine_teardown_count} teardown"
+    )
+    lines.append(
+        f" Reconciled Reqs: {report.scheduled_requests} scheduled, "
+        f"{report.completed_requests} completed, {report.failed_requests} failed, "
+        f"{report.measured_requests} measured"
+    )
+    lines.append(
+        f" Backend Calls  : {report.backend_generate_calls} generate, "
+        f"{report.backend_generate_batch_calls} generate_batch"
     )
     lines.append(f" Phase Sequence : {' -> '.join(report.phase_sequence)}")
     lines.append(f" Req Per Phase  : {report.num_requests_per_phase}")

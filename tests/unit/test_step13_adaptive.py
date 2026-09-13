@@ -3,6 +3,7 @@
 import asyncio
 import tempfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -685,6 +686,8 @@ class TestStep13CLIParsingAndDispatch:
             args = parser.parse_args(
                 [
                     "--experiment-step13",
+                    "--backend",
+                    "mock",
                     "--num-requests-per-phase",
                     "8",
                 ]
@@ -692,3 +695,119 @@ class TestStep13CLIParsingAndDispatch:
             rc = await run_benchmark_cli(args)
             assert rc == 0
             assert mock_runner.run_experiment.await_count == 1
+
+
+class TestStep13HardRuntimeInvariants:
+    """Scientific audit tests verifying invariant reconciliation and backend confirmation."""
+
+    @pytest.mark.asyncio
+    async def test_hard_runtime_invariants_reconciliation(self) -> None:
+        """Verify 100% reconciliation of scheduled, completed, failed, and measured counters."""
+        backend = MockBackend(default_latency_sec=0.001)
+        runner = Step13AdaptiveExperimentRunner(
+            model_id="mock-qwen-invariant-test",
+            enforce_eager=True,
+            policy=AdaptationPolicy(min_dwell_time_sec=0.0, cooldown_windows=0),
+            detection_config=RegimeDetectionConfig(min_requests_for_detection=2),
+        )
+
+        n_reqs = 6
+        report = await runner.run_experiment(
+            backend=backend,
+            num_requests_per_phase=n_reqs,
+            seed=42,
+        )
+
+        # 1. Check top-level report identity & reconciliation
+        assert report.backend == "mock"
+        assert report.backend_execution_confirmed is False  # Mock backend is NOT real GPU execution
+        assert report.engine_instance_id == backend.instance_id
+        assert report.scheduled_requests == 3 * 4 * n_reqs  # 3 conditions x 4 phases x n_reqs
+        assert report.completed_requests == 3 * 4 * n_reqs
+        assert report.failed_requests == 0
+        assert report.measured_requests == 3 * 4 * n_reqs
+        assert report.backend_generate_calls + report.backend_generate_batch_calls > 0
+        assert backend.total_requests_executed == report.scheduled_requests
+
+        # 2. Check per-condition reconciliation and total_latency >= queue_wait
+        for cond in report.conditions.values():
+            assert cond.scheduled_requests == 4 * n_reqs
+            assert cond.completed_requests == 4 * n_reqs
+            assert cond.failed_requests == 0
+            assert cond.measured_requests == 4 * n_reqs
+            assert cond.backend_generate_calls + cond.backend_generate_batch_calls > 0
+            assert cond.integrity_valid is True
+            assert cond.engine_instance_id == backend.instance_id
+
+            # Invariant: throughput == completed / duration
+            assert cond.total_duration_sec > 0.0
+            expected_tput = cond.completed_requests / cond.total_duration_sec
+            assert abs(cond.overall_throughput_rps - expected_tput) < 1e-4
+
+            # Check each phase
+            for pm in cond.phase_metrics:
+                assert pm.scheduled_requests == n_reqs
+                assert pm.completed_requests == n_reqs
+                assert pm.failed_requests == 0
+                assert pm.measured_requests == n_reqs
+                assert pm.mean_latency_ms >= pm.avg_queue_wait_ms - 1e-6
+                assert pm.p95_latency_ms >= pm.avg_queue_wait_ms - 1e-6
+                expected_p_tput = pm.completed_requests / pm.duration_sec
+                assert abs(pm.throughput_rps - expected_p_tput) < 1e-4
+
+    @pytest.mark.asyncio
+    async def test_vllm_backend_confirmation_flag(self) -> None:
+        """Verify backend_execution_confirmed is True when running against real VLLMBackend."""
+        from inferopt.backends.vllm import VLLMBackend
+
+        # Create mock backend that impersonates a real VLLMBackend
+        fake_vllm = MagicMock(spec=VLLMBackend)
+        fake_vllm.backend_name = "vllm"
+        fake_vllm.is_real_execution = True
+        fake_vllm.instance_id = "vllm-test-gpu-id"
+        fake_vllm.engine_initializations = 1
+        fake_vllm.engine_teardowns = 0
+        fake_vllm.generate_calls = 0
+        fake_vllm.generate_batch_calls = 0
+        fake_vllm.total_requests_executed = 0
+
+        async def fake_generate(req: Any) -> Any:
+            fake_vllm.generate_calls += 1
+            fake_vllm.total_requests_executed += 1
+            from inferopt.core.models import InferenceResponse
+            return InferenceResponse(
+                request_id=req.request_id,
+                generated_text="test output",
+                input_tokens=10,
+                output_tokens=15,
+                latency_ms=120.0,
+                backend_name="vllm",
+            )
+
+        async def fake_batch_generate(batch: Any) -> Any:
+            fake_vllm.generate_batch_calls += 1
+            fake_vllm.total_requests_executed += len(batch.requests)
+            from inferopt.core.models import InferenceResponse
+            return [
+                InferenceResponse(
+                    request_id=r.request_id,
+                    generated_text="test output",
+                    input_tokens=10,
+                    output_tokens=15,
+                    latency_ms=120.0,
+                    backend_name="vllm",
+                )
+                for r in batch.requests
+            ]
+
+        fake_vllm.generate = AsyncMock(side_effect=fake_generate)
+        fake_vllm.generate_batch = AsyncMock(side_effect=fake_batch_generate)
+
+        runner = Step13AdaptiveExperimentRunner(model_id="Qwen/Qwen2.5-0.5B-Instruct")
+        report = await runner.run_experiment(backend=fake_vllm, num_requests_per_phase=2, seed=42)
+
+        assert report.backend == "vllm"
+        assert report.backend_execution_confirmed is True
+        assert report.engine_instance_id == "vllm-test-gpu-id"
+        assert report.scheduled_requests == 3 * 4 * 2
+        assert report.completed_requests == report.scheduled_requests

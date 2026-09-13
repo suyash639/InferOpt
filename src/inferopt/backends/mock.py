@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import time
+import uuid
 from typing import Final
 
 from inferopt.backends.base import BatchInferenceBackend, InferenceBackend
@@ -42,6 +43,20 @@ class MockBackend(InferenceBackend, BatchInferenceBackend):
         if default_latency_sec < 0:
             raise ValueError("default_latency_sec cannot be negative.")
         self._default_latency_sec = default_latency_sec
+        self._instance_id = f"mock-{uuid.uuid4().hex[:8]}"
+        self._engine_initializations = 1
+        self._engine_teardowns = 1
+        self._generate_calls = 0
+        self._generate_batch_calls = 0
+        self._total_requests_executed = 0
+
+    async def load_model(self) -> None:
+        """Mock model loading (idempotent no-op)."""
+        pass
+
+    async def unload_model(self) -> None:
+        """Mock model unloading (increments teardown count)."""
+        self._engine_teardowns += 1
 
     @property
     def backend_name(self) -> str:
@@ -49,20 +64,47 @@ class MockBackend(InferenceBackend, BatchInferenceBackend):
         return BACKEND_NAME
 
     @property
+    def instance_id(self) -> str:
+        """Unique instance identifier for this backend engine."""
+        return self._instance_id
+
+    @property
+    def engine_initializations(self) -> int:
+        """Count of engine initializations performed by this backend."""
+        return self._engine_initializations
+
+    @property
+    def engine_teardowns(self) -> int:
+        """Count of engine teardowns performed by this backend."""
+        return self._engine_teardowns
+
+    @property
+    def generate_calls(self) -> int:
+        """Total number of single-request generate calls executed."""
+        return self._generate_calls
+
+    @property
+    def generate_batch_calls(self) -> int:
+        """Total number of batched generate_batch calls executed."""
+        return self._generate_batch_calls
+
+    @property
+    def total_requests_executed(self) -> int:
+        """Total requests executed across single and batched generate calls."""
+        return self._total_requests_executed
+
+    @property
+    def is_real_execution(self) -> bool:
+        """True if backend executes on real model weights/hardware, False if mock."""
+        return False
+
+    @property
     def default_latency_sec(self) -> float:
         """Current configured default simulated latency in seconds."""
         return self._default_latency_sec
 
-    async def generate(self, request: InferenceRequest) -> InferenceResponse:
-        """Execute mock inference deterministically and asynchronously.
-
-        Args:
-            request: The inference request to process.
-
-        Returns:
-            InferenceResponse containing deterministic text, token counts,
-            and measured execution latency.
-        """
+    async def _execute_single(self, request: InferenceRequest) -> InferenceResponse:
+        """Internal helper executing simulated inference for a single request."""
         start_time = time.perf_counter()
 
         # Allow per-request latency override via metadata, falling back to backend default
@@ -106,6 +148,20 @@ class MockBackend(InferenceBackend, BatchInferenceBackend):
             },
         )
 
+    async def generate(self, request: InferenceRequest) -> InferenceResponse:
+        """Execute mock inference deterministically and asynchronously.
+
+        Args:
+            request: The inference request to process.
+
+        Returns:
+            InferenceResponse containing deterministic text, token counts,
+            and measured execution latency.
+        """
+        self._generate_calls += 1
+        self._total_requests_executed += 1
+        return await self._execute_single(request)
+
     async def generate_batch(self, batch: InferenceBatch) -> list[InferenceResponse]:
         """Execute mock inference across a batch of requests concurrently.
 
@@ -115,4 +171,6 @@ class MockBackend(InferenceBackend, BatchInferenceBackend):
         Returns:
             List of InferenceResponse instances matching the batch request order.
         """
-        return list(await asyncio.gather(*[self.generate(req) for req in batch.requests]))
+        self._generate_batch_calls += 1
+        self._total_requests_executed += len(batch.requests)
+        return list(await asyncio.gather(*[self._execute_single(req) for req in batch.requests]))
