@@ -125,6 +125,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run Step 12 Multi-Workload Generalization Experiment.",
     )
     parser.add_argument(
+        "--experiment-step13",
+        action="store_true",
+        help="Run Step 13 Online Adaptive Control & Dynamic Reconfiguration Experiment.",
+    )
+    parser.add_argument(
+        "--phase-sequence",
+        nargs="+",
+        default=None,
+        help="Phase sequence for Step 13 (e.g. light bursty saturated light).",
+    )
+    parser.add_argument(
+        "--num-requests-per-phase",
+        type=int,
+        default=16,
+        help="Number of requests per phase in Step 13 (default: 16).",
+    )
+    parser.add_argument(
         "--workloads",
         nargs="+",
         help=(
@@ -184,6 +201,68 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def run_benchmark_cli(args: argparse.Namespace) -> int:
     """Execute benchmark run with arguments parsed from CLI."""
+    # Step 13: Online Adaptive Control & Dynamic Reconfiguration Experiment
+    if args.experiment_step13:
+        from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID, VLLMBackend, VLLMConfig
+        from inferopt.benchmarks.step13_adaptive import (
+            Step13AdaptiveExperimentRunner,
+            format_step13_report,
+        )
+
+        model_id = args.model if args.model is not None else DEFAULT_VLLM_MODEL_ID
+        num_reqs = args.num_requests_per_phase if args.num_requests_per_phase is not None else 16
+        out_path = (
+            args.output
+            if args.output is not None
+            else "benchmarks/results/step13/step13_adaptive_report.json"
+        )
+
+        print("\n" + "=" * 80)
+        print("  STARTING INFEROPT STEP 13 ONLINE ADAPTIVE CONTROL EXPERIMENT")
+        print("=" * 80)
+        print(f"  Model ID:            {model_id}")
+        print(f"  Requests Per Phase:  {num_reqs}")
+        print(f"  Seed:                {args.seed}")
+        print(f"  Enforce Eager:       {args.enforce_eager}")
+        print(f"  Output Path:         {out_path}")
+        print("=" * 80 + "\n")
+
+        backend_inst: InferenceBackend
+        if args.backend == "vllm":
+            backend_inst = VLLMBackend(
+                config=VLLMConfig(
+                    model=model_id,
+                    enforce_eager=args.enforce_eager,
+                )
+            )
+        elif args.backend == "mlx":
+            from inferopt.backends.mlx import DEFAULT_MODEL_ID as DEFAULT_MLX_MODEL_ID
+            from inferopt.backends.mlx import MLXBackend
+
+            backend_inst = MLXBackend(model_id=args.model or DEFAULT_MLX_MODEL_ID)
+        else:
+            backend_inst = MockBackend(default_latency_sec=0.005)
+
+        runner_step13 = Step13AdaptiveExperimentRunner(
+            model_id=model_id,
+            enforce_eager=args.enforce_eager,
+        )
+
+        report_step13 = await runner_step13.run_experiment(
+            backend=backend_inst,
+            num_requests_per_phase=num_reqs,
+            seed=args.seed,
+        )
+
+        print()
+        print(format_step13_report(report_step13))
+        if out_path:
+            report_step13.save_json(out_path)
+            print(f"\nSaved structured Step 13 online adaptive control JSON report to: {out_path}")
+
+        adaptive_summary = report_step13.conditions.get("ADAPTIVE_INFEROPT")
+        return 0 if (adaptive_summary is not None and adaptive_summary.integrity_valid) else 1
+
     # Step 12: Multi-Workload Generalization Experiment
     if args.experiment_step12:
         from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID

@@ -12,6 +12,7 @@ from inferopt.optimizer.adaptation_models import (
 )
 from inferopt.optimizer.engine import DeterministicOptimizer, calculate_objective_score
 from inferopt.optimizer.models import OptimizationObjectiveType, TunableConfig
+from inferopt.optimizer.regime_detector import RegimeDetectionResult, WorkloadRegime
 from inferopt.scheduler.config import SchedulerConfig
 from inferopt.scheduler.scheduler import Scheduler
 from inferopt.telemetry.models import AdaptationEvent, MetricsSnapshot
@@ -91,6 +92,9 @@ class AdaptiveController:
 
         self._window_counter: int = 0
         self._cooldown_counter: int = 0
+        self._current_regime: WorkloadRegime = WorkloadRegime.UNKNOWN
+        self._regime_consecutive_count: int = 0
+        self._last_adaptation_time: float = 0.0
         self._known_good_stack: list[tuple[TunableConfig, float]] = []
         self._history: list[AdaptationRecord] = []
 
@@ -112,6 +116,11 @@ class AdaptiveController:
     def scheduler(self) -> Scheduler | None:
         """Attached Scheduler instance, if any."""
         return self._scheduler
+
+    @property
+    def current_regime(self) -> WorkloadRegime:
+        """Currently active detected workload regime."""
+        return self._current_regime
 
     @property
     def cooldown_remaining(self) -> int:
@@ -144,6 +153,9 @@ class AdaptiveController:
         """Reset internal counters, cooldowns, and decision history."""
         self._window_counter = 0
         self._cooldown_counter = 0
+        self._current_regime = WorkloadRegime.UNKNOWN
+        self._regime_consecutive_count = 0
+        self._last_adaptation_time = 0.0
         self._known_good_stack.clear()
         self._history.clear()
         if self._scheduler is not None:
@@ -428,7 +440,8 @@ class AdaptiveController:
         if self._scheduler is not None:
             self._scheduler.apply_config(target_tunable.to_scheduler_config())
 
-        # 2. Update known-good stack and cooldown
+        # 2. Update known-good stack, cooldown, and last adaptation timestamp
+        self._last_adaptation_time = time.time()
         if decision.decision_type == AdaptationDecisionType.APPLY:
             self._known_good_stack.append((decision.current_config, decision.current_score or 0.0))
             if len(self._known_good_stack) > 10:
@@ -436,7 +449,6 @@ class AdaptiveController:
             self._cooldown_counter = self._policy.cooldown_windows
         elif decision.decision_type == AdaptationDecisionType.ROLLBACK:
             self._cooldown_counter = self._policy.cooldown_windows
-            # If we rolled back to the top known-good config, retain it
 
         # 3. Record telemetry event if collector is available
         collector = self._scheduler.collector if self._scheduler is not None else None
@@ -469,6 +481,10 @@ class AdaptiveController:
                     target_score=old_rec.target_score,
                     improvement_pct=old_rec.improvement_pct,
                     reason=old_rec.reason,
+                    detected_regime=old_rec.detected_regime,
+                    previous_regime=old_rec.previous_regime,
+                    in_flight_requests=old_rec.in_flight_requests,
+                    queue_depth=old_rec.queue_depth,
                     is_applied=True,
                     timestamp=old_rec.timestamp,
                 )
@@ -509,6 +525,237 @@ class AdaptiveController:
                     proposed_score=decision.proposed_score,
                     improvement_pct=decision.improvement_pct,
                     reason=decision.reason,
+                    detected_regime=decision.detected_regime,
+                    previous_regime=decision.previous_regime,
+                    in_flight_requests=decision.in_flight_requests,
+                    queue_depth=decision.queue_depth,
+                    timestamp=decision.timestamp,
+                    is_applied=True,
+                )
+        return decision
+
+    def evaluate_regime(
+        self,
+        snapshot: MetricsSnapshot,
+        regime_result: RegimeDetectionResult,
+        current_config: TunableConfig | SchedulerConfig | None = None,
+    ) -> AdaptationDecision:
+        """Evaluate a detected workload regime against the adaptation policy.
+
+        Args:
+            snapshot: Current telemetry metrics snapshot.
+            regime_result: Result from DeterministicRegimeDetector.
+            current_config: Optional active configuration override.
+
+        Returns:
+            AdaptationDecision detailing the evaluation outcome and proposed configuration.
+        """
+        self._window_counter += 1
+        window_id = self._window_counter
+
+        # 1. Resolve current active configuration
+        resolved_config: TunableConfig
+        if current_config is not None:
+            if isinstance(current_config, SchedulerConfig):
+                resolved_config = TunableConfig.from_scheduler_config(current_config)
+            else:
+                resolved_config = current_config
+        elif self._scheduler is not None:
+            resolved_config = TunableConfig.from_scheduler_config(self._scheduler.config)
+        else:
+            resolved_config = TunableConfig()
+
+        in_flight = snapshot.queue.current_active_requests
+        curr_q = snapshot.queue.current_queue_depth
+
+        # 2. Check for UNKNOWN regime (insufficient window data)
+        if regime_result.regime == WorkloadRegime.UNKNOWN:
+            decision = AdaptationDecision(
+                window_id=window_id,
+                decision_type=AdaptationDecisionType.INSUFFICIENT_DATA,
+                current_config=resolved_config,
+                detected_regime=WorkloadRegime.UNKNOWN,
+                previous_regime=self._current_regime,
+                in_flight_requests=in_flight,
+                queue_depth=curr_q,
+                reason=regime_result.reason,
+            )
+            self._history.append(AdaptationRecord.from_decision(decision, is_applied=False))
+            return decision
+
+        # 3. Dwell time & Cooldown check
+        now = time.time()
+        if (
+            self._last_adaptation_time > 0.0
+            and (now - self._last_adaptation_time) < self._policy.min_dwell_time_sec
+        ):
+            decision = AdaptationDecision(
+                window_id=window_id,
+                decision_type=AdaptationDecisionType.COOLDOWN,
+                current_config=resolved_config,
+                detected_regime=regime_result.regime,
+                previous_regime=self._current_regime,
+                in_flight_requests=in_flight,
+                queue_depth=curr_q,
+                reason=(
+                    f"Dwell time active ({now - self._last_adaptation_time:.2f}s < "
+                    f"{self._policy.min_dwell_time_sec:.2f}s)."
+                ),
+            )
+            self._history.append(AdaptationRecord.from_decision(decision, is_applied=False))
+            return decision
+
+        if self._cooldown_counter > 0:
+            self._cooldown_counter -= 1
+            decision = AdaptationDecision(
+                window_id=window_id,
+                decision_type=AdaptationDecisionType.COOLDOWN,
+                current_config=resolved_config,
+                detected_regime=regime_result.regime,
+                previous_regime=self._current_regime,
+                in_flight_requests=in_flight,
+                queue_depth=curr_q,
+                reason=f"Cooldown active ({self._cooldown_counter} window(s) remaining).",
+            )
+            self._history.append(AdaptationRecord.from_decision(decision, is_applied=False))
+            return decision
+
+        # 4. Anti-flapping / Evidence count verification
+        prev_reg = self._current_regime
+        if regime_result.regime == self._current_regime:
+            self._regime_consecutive_count += 1
+        else:
+            self._current_regime = regime_result.regime
+            self._regime_consecutive_count = 1
+
+        if self._regime_consecutive_count < self._policy.min_regime_evidence_count:
+            decision = AdaptationDecision(
+                window_id=window_id,
+                decision_type=AdaptationDecisionType.NO_CHANGE,
+                current_config=resolved_config,
+                detected_regime=regime_result.regime,
+                previous_regime=prev_reg,
+                in_flight_requests=in_flight,
+                queue_depth=curr_q,
+                reason=(
+                    f"Regime {regime_result.regime} observed in {self._regime_consecutive_count}/"
+                    f"{self._policy.min_regime_evidence_count} required consecutive windows."
+                ),
+            )
+            self._history.append(AdaptationRecord.from_decision(decision, is_applied=False))
+            return decision
+
+        # 5. Lookup target configuration from regime policy
+        target_cfg = self._policy.regime_policy.get(regime_result.regime)
+        if target_cfg is None:
+            decision = AdaptationDecision(
+                window_id=window_id,
+                decision_type=AdaptationDecisionType.NO_CHANGE,
+                current_config=resolved_config,
+                detected_regime=regime_result.regime,
+                previous_regime=prev_reg,
+                in_flight_requests=in_flight,
+                queue_depth=curr_q,
+                reason=f"No configuration mapping defined for regime {regime_result.regime}.",
+            )
+            self._history.append(AdaptationRecord.from_decision(decision, is_applied=False))
+            return decision
+
+        # 6. Policy Safety Bounds Check
+        within_bounds, bounds_msg = self._policy.is_within_bounds(target_cfg)
+        if not within_bounds:
+            decision = AdaptationDecision(
+                window_id=window_id,
+                decision_type=AdaptationDecisionType.INFEASIBLE,
+                current_config=resolved_config,
+                proposed_config=target_cfg,
+                detected_regime=regime_result.regime,
+                previous_regime=prev_reg,
+                in_flight_requests=in_flight,
+                queue_depth=curr_q,
+                reason=f"Target config {target_cfg} violates policy bounds: {bounds_msg}",
+            )
+            self._history.append(AdaptationRecord.from_decision(decision, is_applied=False))
+            return decision
+
+        # 7. Check if target configuration is already active
+        if target_cfg == resolved_config:
+            decision = AdaptationDecision(
+                window_id=window_id,
+                decision_type=AdaptationDecisionType.NO_CHANGE,
+                current_config=resolved_config,
+                proposed_config=target_cfg,
+                detected_regime=regime_result.regime,
+                previous_regime=prev_reg,
+                in_flight_requests=in_flight,
+                queue_depth=curr_q,
+                reason=(
+                    f"Active configuration {resolved_config} already matches "
+                    f"detected regime {regime_result.regime}."
+                ),
+            )
+            self._history.append(AdaptationRecord.from_decision(decision, is_applied=False))
+            return decision
+
+        # 8. Accept transition (APPLY)
+        reason = (
+            f"Regime transition detected: {regime_result.regime} "
+            f"(queue={regime_result.peak_queue_depth}, "
+            f"conc={regime_result.active_concurrency}, "
+            f"arr={regime_result.arrival_rate_rps:.2f} rps). "
+            f"Transitioning configuration from {resolved_config} to {target_cfg}."
+        )
+        decision = AdaptationDecision(
+            window_id=window_id,
+            decision_type=AdaptationDecisionType.APPLY,
+            current_config=resolved_config,
+            proposed_config=target_cfg,
+            detected_regime=regime_result.regime,
+            previous_regime=prev_reg,
+            in_flight_requests=in_flight,
+            queue_depth=curr_q,
+            reason=reason,
+        )
+        self._history.append(AdaptationRecord.from_decision(decision, is_applied=False))
+        return decision
+
+    def step_regime(
+        self,
+        snapshot: MetricsSnapshot,
+        regime_result: RegimeDetectionResult,
+        current_config: TunableConfig | SchedulerConfig | None = None,
+    ) -> AdaptationDecision:
+        """Evaluate detected regime and automatically apply configuration update if accepted.
+
+        Args:
+            snapshot: Current telemetry metrics snapshot.
+            regime_result: Result from DeterministicRegimeDetector.
+            current_config: Optional active configuration override.
+
+        Returns:
+            The evaluated AdaptationDecision (with is_applied reflected).
+        """
+        decision = self.evaluate_regime(snapshot, regime_result, current_config)
+        if decision.decision_type in (
+            AdaptationDecisionType.APPLY,
+            AdaptationDecisionType.ROLLBACK,
+        ):
+            applied = self.apply_decision(decision)
+            if applied:
+                decision = AdaptationDecision(
+                    decision_id=decision.decision_id,
+                    window_id=decision.window_id,
+                    decision_type=decision.decision_type,
+                    current_config=decision.current_config,
+                    proposed_config=decision.proposed_config,
+                    current_score=decision.current_score,
+                    proposed_score=decision.proposed_score,
+                    improvement_pct=decision.improvement_pct,
+                    reason=decision.reason,
+                    detected_regime=decision.detected_regime,
+                    previous_regime=decision.previous_regime,
+                    in_flight_requests=decision.in_flight_requests,
+                    queue_depth=decision.queue_depth,
                     timestamp=decision.timestamp,
                     is_applied=True,
                 )

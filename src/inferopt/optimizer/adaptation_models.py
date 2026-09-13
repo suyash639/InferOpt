@@ -11,6 +11,22 @@ from inferopt.optimizer.models import (
     OptimizationConstraints,
     TunableConfig,
 )
+from inferopt.optimizer.regime_detector import WorkloadRegime
+
+
+def get_default_regime_policy() -> dict[WorkloadRegime, TunableConfig]:
+    """Provide standard deterministic regime-to-configuration mappings."""
+    return {
+        WorkloadRegime.LIGHT: TunableConfig(
+            max_concurrency=1, max_batch_size=2, batch_wait_ms=50.0
+        ),
+        WorkloadRegime.BURSTY: TunableConfig(
+            max_concurrency=8, max_batch_size=8, batch_wait_ms=50.0
+        ),
+        WorkloadRegime.SATURATED: TunableConfig(
+            max_concurrency=8, max_batch_size=8, batch_wait_ms=50.0
+        ),
+    }
 
 
 class AdaptationDecisionType(StrEnum):
@@ -37,6 +53,22 @@ class AdaptationPolicy(BaseModel):
     constraints: OptimizationConstraints | None = Field(
         default=None,
         description="Optional SLA and operational constraints for candidate feasibility.",
+    )
+    regime_policy: dict[WorkloadRegime, TunableConfig] = Field(
+        default_factory=get_default_regime_policy,
+        description=(
+            "Deterministic mapping from detected workload regime to candidate configuration."
+        ),
+    )
+    min_dwell_time_sec: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Minimum wall-clock dwell time in seconds before allowing reconfiguration.",
+    )
+    min_regime_evidence_count: int = Field(
+        default=1,
+        ge=1,
+        description="Minimum consecutive evaluation windows observing a regime before switching.",
     )
     min_improvement_pct: float = Field(
         default=5.0,
@@ -201,6 +233,24 @@ class AdaptationDecision(BaseModel):
         min_length=1,
         description="Explainable human-readable justification for the decision.",
     )
+    detected_regime: WorkloadRegime | None = Field(
+        default=None,
+        description="Detected workload regime triggering or evaluated in this decision.",
+    )
+    previous_regime: WorkloadRegime | None = Field(
+        default=None,
+        description="Previous workload regime prior to this decision.",
+    )
+    in_flight_requests: int | None = Field(
+        default=None,
+        ge=0,
+        description="Active requests in execution at decision time.",
+    )
+    queue_depth: int | None = Field(
+        default=None,
+        ge=0,
+        description="Pending queue depth at decision time.",
+    )
     timestamp: float = Field(
         default_factory=time.time,
         description="Wall-clock timestamp of decision creation.",
@@ -255,6 +305,24 @@ class AdaptationRecord(BaseModel):
         min_length=1,
         description="Explanatory reason.",
     )
+    detected_regime: WorkloadRegime | None = Field(
+        default=None,
+        description="Detected workload regime.",
+    )
+    previous_regime: WorkloadRegime | None = Field(
+        default=None,
+        description="Previous workload regime.",
+    )
+    in_flight_requests: int | None = Field(
+        default=None,
+        ge=0,
+        description="Active requests in execution at decision time.",
+    )
+    queue_depth: int | None = Field(
+        default=None,
+        ge=0,
+        description="Pending queue depth at decision time.",
+    )
     is_applied: bool = Field(
         default=False,
         description="Whether the configuration was applied to the scheduler.",
@@ -280,6 +348,10 @@ class AdaptationRecord(BaseModel):
             target_score=decision.proposed_score,
             improvement_pct=decision.improvement_pct,
             reason=decision.reason,
+            detected_regime=decision.detected_regime,
+            previous_regime=decision.previous_regime,
+            in_flight_requests=decision.in_flight_requests,
+            queue_depth=decision.queue_depth,
             is_applied=applied,
             timestamp=decision.timestamp,
         )

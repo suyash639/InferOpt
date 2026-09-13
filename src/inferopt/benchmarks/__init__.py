@@ -74,6 +74,17 @@ from inferopt.benchmarks.step12_generalization import (
     format_step12_report,
     get_step12_workload_matrix,
 )
+from inferopt.benchmarks.step13_adaptive import (
+    Step13AdaptationEventRecord,
+    Step13AdaptiveExperimentRunner,
+    Step13AdaptiveReport,
+    Step13BaselineComparison,
+    Step13ConditionSummary,
+    Step13PhaseMetricRecord,
+    classify_step13_findings,
+    format_step13_report,
+    get_step13_phase_sequence,
+)
 from inferopt.benchmarks.vllm_baseline import (
     DirectVLLMRequestResult,
     DirectVLLMResult,
@@ -131,6 +142,12 @@ __all__ = [
     "Step12GeneralizationReport",
     "Step12GeneralizationRunner",
     "Step12WorkloadReport",
+    "Step13AdaptationEventRecord",
+    "Step13AdaptiveExperimentRunner",
+    "Step13AdaptiveReport",
+    "Step13BaselineComparison",
+    "Step13ConditionSummary",
+    "Step13PhaseMetricRecord",
     "VLLMBenchmarkRequestRecord",
     "VLLMComparisonDelta",
     "VLLMCondition",
@@ -147,6 +164,7 @@ __all__ = [
     "calculate_percentile",
     "classify_step11_findings",
     "classify_step12_findings",
+    "classify_step13_findings",
     "compute_cross_workload_summary",
     "compute_sha256",
     "compute_std_dev",
@@ -160,6 +178,7 @@ __all__ = [
     "format_matrix_table",
     "format_step11_report",
     "format_step12_report",
+    "format_step13_report",
     "format_vllm_batch_table",
     "format_vllm_deltas_table",
     "format_vllm_full_report",
@@ -176,5 +195,6 @@ __all__ = [
     "get_mixed_workload",
     "get_single_workload",
     "get_step12_workload_matrix",
+    "get_step13_phase_sequence",
     "vllm_condition_to_benchmark_result",
 ]

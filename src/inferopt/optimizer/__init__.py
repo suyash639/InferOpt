@@ -5,6 +5,7 @@ from inferopt.optimizer.adaptation_models import (
     AdaptationDecisionType,
     AdaptationPolicy,
     AdaptationRecord,
+    get_default_regime_policy,
 )
 from inferopt.optimizer.controller import AdaptiveController
 from inferopt.optimizer.engine import DeterministicOptimizer, calculate_objective_score
@@ -17,6 +18,12 @@ from inferopt.optimizer.models import (
     OptimizationResult,
     TunableConfig,
 )
+from inferopt.optimizer.regime_detector import (
+    DeterministicRegimeDetector,
+    RegimeDetectionConfig,
+    RegimeDetectionResult,
+    WorkloadRegime,
+)
 
 __all__ = [
     "AdaptationDecision",
@@ -27,10 +34,15 @@ __all__ = [
     "CandidateEvaluation",
     "CandidateSpace",
     "DeterministicOptimizer",
+    "DeterministicRegimeDetector",
     "ObjectiveConfig",
     "OptimizationConstraints",
     "OptimizationObjectiveType",
     "OptimizationResult",
+    "RegimeDetectionConfig",
+    "RegimeDetectionResult",
     "TunableConfig",
+    "WorkloadRegime",
     "calculate_objective_score",
+    "get_default_regime_policy",
 ]
