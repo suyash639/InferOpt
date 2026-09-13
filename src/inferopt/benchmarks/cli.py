@@ -120,10 +120,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run Step 11 Workload-Aware Batch Configuration Selection Experiment.",
     )
     parser.add_argument(
+        "--experiment-step12",
+        action="store_true",
+        help="Run Step 12 Multi-Workload Generalization Experiment.",
+    )
+    parser.add_argument(
+        "--workloads",
+        nargs="+",
+        help=(
+            "Filter workload classes to evaluate in Step 12 "
+            "(e.g. A_LIGHT B_BURSTY C_SATURATED D_MIXED)."
+        ),
+    )
+    parser.add_argument(
         "--val-repetitions",
         type=int,
         default=None,
-        help="Measured repetition trials for independent validation in Step 11 (default: 3).",
+        help="Measured repetition trials for independent validation in Step 11/12 (default: 3).",
     )
     parser.add_argument(
         "--enforce-eager",
@@ -171,6 +184,98 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def run_benchmark_cli(args: argparse.Namespace) -> int:
     """Execute benchmark run with arguments parsed from CLI."""
+    # Step 12: Multi-Workload Generalization Experiment
+    if args.experiment_step12:
+        from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID
+        from inferopt.benchmarks.step12_generalization import (
+            Step12GeneralizationRunner,
+            format_step12_report,
+            get_step12_workload_matrix,
+        )
+        from inferopt.optimizer.models import CandidateSpace
+
+        model_id = args.model if args.model is not None else DEFAULT_VLLM_MODEL_ID
+
+        warmup_count = args.warmup if args.warmup is not None else 2
+        repetitions = args.repetitions if args.repetitions is not None else 3
+        val_repetitions = args.val_repetitions if args.val_repetitions is not None else 3
+
+        if args.concurrency is not None:
+            if isinstance(args.concurrency, list):
+                concurrencies = tuple(args.concurrency)
+            else:
+                concurrencies = (args.concurrency,)
+        else:
+            concurrencies = (1, 4, 8)
+
+        if args.batch_sizes is not None:
+            batch_sizes = tuple(args.batch_sizes)
+        elif args.max_batch_size is not None:
+            batch_sizes = (args.max_batch_size,)
+        else:
+            batch_sizes = (1, 2, 4, 8)
+
+        batch_wait_ms = args.batch_wait_ms if args.batch_wait_ms is not None else 50.0
+
+        space = CandidateSpace(
+            concurrencies=concurrencies,
+            batch_sizes=batch_sizes,
+            batch_waits_ms=(batch_wait_ms,),
+        )
+
+        out_dir = args.output if args.output is not None else "benchmarks/results/step12"
+
+        # Construct workload matrix
+        matrix = get_step12_workload_matrix(
+            seed=args.seed,
+            num_requests=args.num_requests,
+        )
+        if args.workloads:
+            selected_keys = set(args.workloads)
+            matrix = {k: v for k, v in matrix.items() if k in selected_keys}
+            if not matrix:
+                print(
+                    f"Error: No matching workloads found for {args.workloads}",
+                    file=sys.stderr,
+                )
+                return 1
+
+        print("\n" + "=" * 80)
+        print("  STARTING INFEROPT STEP 12 MULTI-WORKLOAD GENERALIZATION EXPERIMENT")
+        print("=" * 80)
+        print(f"  Model ID:            {model_id}")
+        print(f"  Workloads in Matrix: {list(matrix.keys())}")
+        print(
+            f"  Candidate Space:     concurrency={concurrencies}, "
+            f"batch_sizes={batch_sizes}, wait={batch_wait_ms}ms"
+        )
+        print(f"  Total Candidates:    {space.total_candidates} per workload")
+        print(f"  Enforce Eager:       {args.enforce_eager}")
+        print(f"  Exploration Reps:    {repetitions} (Warmup: {warmup_count})")
+        print(f"  Validation Reps:     {val_repetitions}")
+        print(f"  Output Dir:          {out_dir}")
+        print("=" * 80 + "\n")
+
+        runner_step12 = Step12GeneralizationRunner(
+            model_id=model_id,
+            enforce_eager=args.enforce_eager,
+        )
+
+        report_step12 = await runner_step12.run_experiment(
+            workloads=matrix,
+            candidate_space=space,
+            warmup_count=warmup_count,
+            exploration_repetitions=repetitions,
+            validation_repetitions=val_repetitions,
+            batch_wait_ms=batch_wait_ms,
+            output_dir=out_dir,
+        )
+
+        print()
+        print(format_step12_report(report_step12))
+        print(f"\nSaved structured Step 12 generalization JSON report to: {out_dir}")
+        return 0 if report_step12.summary.total_integrity_failures == 0 else 1
+
     # Step 11: Workload-Aware Batch Configuration Selection Experiment
     if args.experiment_step11:
         from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID
