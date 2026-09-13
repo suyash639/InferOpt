@@ -53,7 +53,16 @@ from inferopt.benchmarks.models import (
     WorkloadRequestSpec,
     WorkloadScenario,
 )
-from inferopt.benchmarks.runner import BenchmarkRunner
+from inferopt.benchmarks.step11_experiment import (
+    Step11CandidateResult,
+    Step11ExperimentReport,
+    Step11ExperimentRunner,
+    Step11OptimizerDecision,
+    Step11ValidationResult,
+    classify_step11_findings,
+    format_step11_report,
+    vllm_condition_to_benchmark_result,
+)
 from inferopt.benchmarks.vllm_baseline import (
     DirectVLLMRequestResult,
     DirectVLLMResult,
@@ -100,6 +109,11 @@ __all__ = [
     "MetricComparison",
     "PromptCategory",
     "RepetitionSummary",
+    "Step11CandidateResult",
+    "Step11ExperimentReport",
+    "Step11ExperimentRunner",
+    "Step11OptimizerDecision",
+    "Step11ValidationResult",
     "VLLMBenchmarkRequestRecord",
     "VLLMComparisonDelta",
     "VLLMCondition",
@@ -113,6 +127,7 @@ __all__ = [
     "WorkloadRequestSpec",
     "WorkloadScenario",
     "calculate_percentile",
+    "classify_step11_findings",
     "compute_sha256",
     "compute_std_dev",
     "compute_workload_hash",
@@ -123,6 +138,7 @@ __all__ = [
     "format_audit_token_table",
     "format_comparison_table",
     "format_matrix_table",
+    "format_step11_report",
     "format_vllm_batch_table",
     "format_vllm_deltas_table",
     "format_vllm_full_report",
@@ -138,4 +154,5 @@ __all__ = [
     "get_medium_workload",
     "get_mixed_workload",
     "get_single_workload",
+    "vllm_condition_to_benchmark_result",
 ]

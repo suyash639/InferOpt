@@ -115,6 +115,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run Step 10 controlled Direct vLLM vs InferOpt scientific benchmark experiment.",
     )
     parser.add_argument(
+        "--experiment-step11",
+        action="store_true",
+        help="Run Step 11 Workload-Aware Batch Configuration Selection Experiment.",
+    )
+    parser.add_argument(
+        "--val-repetitions",
+        type=int,
+        default=None,
+        help="Measured repetition trials for independent validation in Step 11 (default: 3).",
+    )
+    parser.add_argument(
         "--enforce-eager",
         action="store_true",
         default=False,
@@ -134,13 +145,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--warmup",
         type=int,
         default=None,
-        help="Warmup requests before timing (default: 2 for audit/vLLM, 1 otherwise).",
+        help="Warmup requests before timing (default: 2 for audit/vLLM/step11, 1 otherwise).",
     )
     parser.add_argument(
         "--repetitions",
         type=int,
         default=None,
-        help="Measured repetition trials (default: 3 for vLLM, 5 for audit, 3 otherwise).",
+        help="Measured repetition trials (default: 3 for vLLM/step11, 5 for audit, 3 otherwise).",
     )
     parser.add_argument(
         "--output",
@@ -160,6 +171,92 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def run_benchmark_cli(args: argparse.Namespace) -> int:
     """Execute benchmark run with arguments parsed from CLI."""
+    # Step 11: Workload-Aware Batch Configuration Selection Experiment
+    if args.experiment_step11:
+        from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID
+        from inferopt.benchmarks.step11_experiment import (
+            Step11ExperimentRunner,
+            format_step11_report,
+        )
+        from inferopt.optimizer.models import CandidateSpace
+
+        model_id = args.model if args.model is not None else DEFAULT_VLLM_MODEL_ID
+
+        scenario_name = args.scenario if args.scenario != "light" else "concurrent_4"
+        scenario_factory = PRESET_SCENARIOS.get(scenario_name, PRESET_SCENARIOS["concurrent_4"])
+        scenario = scenario_factory(args.seed)
+
+        if args.num_requests is not None and args.num_requests > 0:
+            cfg_dict = scenario.config.model_dump()
+            cfg_dict["num_requests"] = args.num_requests
+            scenario = generate_workload(WorkloadConfig.model_validate(cfg_dict))
+
+        warmup_count = args.warmup if args.warmup is not None else 2
+        repetitions = args.repetitions if args.repetitions is not None else 3
+        val_repetitions = args.val_repetitions if args.val_repetitions is not None else 3
+
+        if args.concurrency is not None:
+            if isinstance(args.concurrency, list):
+                concurrencies = tuple(args.concurrency)
+            else:
+                concurrencies = (args.concurrency,)
+        else:
+            concurrencies = (1, 4, 8)
+
+        if args.batch_sizes is not None:
+            batch_sizes = tuple(args.batch_sizes)
+        elif args.max_batch_size is not None:
+            batch_sizes = (args.max_batch_size,)
+        else:
+            batch_sizes = (1, 2, 4, 8)
+
+        batch_wait_ms = args.batch_wait_ms if args.batch_wait_ms is not None else 50.0
+
+        space = CandidateSpace(
+            concurrencies=concurrencies,
+            batch_sizes=batch_sizes,
+            batch_waits_ms=(batch_wait_ms,),
+        )
+
+        out_dir = args.output if args.output is not None else "benchmarks/results/step11"
+
+        print("\n" + "=" * 80)
+        print("  STARTING INFEROPT STEP 11 EXPERIMENT 1: CONFIGURATION SELECTION")
+        print("=" * 80)
+        print(f"  Model ID:            {model_id}")
+        req_info = f"{len(scenario.requests)} requests, seed={args.seed}"
+        print(f"  Scenario:            {scenario.scenario_name} ({req_info})")
+        print(
+            f"  Candidate Space:     concurrency={concurrencies}, "
+            f"batch_sizes={batch_sizes}, wait={batch_wait_ms}ms"
+        )
+        print(f"  Total Candidates:    {space.total_candidates}")
+        print(f"  Enforce Eager:       {args.enforce_eager}")
+        print(f"  Exploration Reps:    {repetitions} (Warmup: {warmup_count})")
+        print(f"  Validation Reps:     {val_repetitions}")
+        print(f"  Output Dir:          {out_dir}")
+        print("=" * 80 + "\n")
+
+        runner_step11 = Step11ExperimentRunner(
+            model_id=model_id,
+            enforce_eager=args.enforce_eager,
+        )
+
+        report_step11 = await runner_step11.run_experiment(
+            scenario=scenario,
+            candidate_space=space,
+            warmup_count=warmup_count,
+            exploration_repetitions=repetitions,
+            validation_repetitions=val_repetitions,
+            batch_wait_ms=batch_wait_ms,
+            output_dir=out_dir,
+        )
+
+        print()
+        print(format_step11_report(report_step11))
+        print(f"\nSaved structured Step 11 experiment JSON report to: {out_dir}")
+        return 0 if report_step11.integrity.is_valid else 1
+
     # Step 10: Controlled Scientific vLLM Benchmark Mode
     if args.validate_vllm:
         from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID
