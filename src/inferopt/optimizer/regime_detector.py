@@ -194,9 +194,8 @@ class DeterministicRegimeDetector:
 
         # Rule 1: Saturated Regime
         # High sustained concurrency (>= 5) or high sustained queue (>= 4 with concurrency >= 4)
-        if (
-            peak_c >= self._config.saturated_min_concurrency
-            or (peak_q >= self._config.saturated_min_queue_depth and peak_c >= 4)
+        if peak_c >= self._config.saturated_min_concurrency or (
+            peak_q >= self._config.saturated_min_queue_depth and peak_c >= 4
         ):
             return RegimeDetectionResult(
                 regime=WorkloadRegime.SATURATED,
@@ -266,9 +265,7 @@ class DeterministicRegimeDetector:
             reason = f"Queue pressure {peak_q} mapped to BURSTY regime."
         else:
             regime = WorkloadRegime.LIGHT
-            reason = (
-                f"Low queue {peak_q} and concurrency {peak_c} mapped to LIGHT regime."
-            )
+            reason = f"Low queue {peak_q} and concurrency {peak_c} mapped to LIGHT regime."
 
         return RegimeDetectionResult(
             regime=regime,

@@ -257,9 +257,7 @@ class Step13ConditionSummary(BaseModel):
     engine_initialization_count: int = Field(
         default=1, description="Count of engine initializations"
     )
-    engine_teardown_count: int = Field(
-        default=0, description="Count of engine teardowns"
-    )
+    engine_teardown_count: int = Field(default=0, description="Count of engine teardowns")
     engine_instance_id: str = Field(
         default="unknown", description="Unique identifier of the executing engine instance"
     )
@@ -313,9 +311,7 @@ class Step13AdaptiveReport(BaseModel):
     engine_initialization_count: int = Field(
         default=1, description="Engine initializations across run"
     )
-    engine_teardown_count: int = Field(
-        default=1, description="Engine teardowns across run"
-    )
+    engine_teardown_count: int = Field(default=1, description="Engine teardowns across run")
     scheduled_requests: int = Field(default=0, ge=0, description="Total scheduled requests in run")
     completed_requests: int = Field(default=0, ge=0, description="Total completed requests in run")
     failed_requests: int = Field(default=0, ge=0, description="Total failed requests in run")
@@ -477,7 +473,7 @@ class Step13AdaptiveExperimentRunner:
                                     time_to_adapt_ms=t_adapt_ms,
                                     in_flight_requests_at_change=dec.in_flight_requests or 0,
                                     queue_depth_at_change=dec.queue_depth or 0,
-                                    )
+                                )
                                 adaptation_events.append(evt)
                                 prev_applied_cfg = dec.proposed_config
 
@@ -529,10 +525,7 @@ class Step13AdaptiveExperimentRunner:
                         async with semaphore:
                             return await _submit_and_check(spec, s_idx)
 
-                    tasks = [
-                        _throttled_submit(spec, i)
-                        for i, spec in enumerate(scenario.requests)
-                    ]
+                    tasks = [_throttled_submit(spec, i) for i, spec in enumerate(scenario.requests)]
                     phase_resps_raw = await asyncio.gather(*tasks)
                     phase_responses = list(phase_resps_raw)
                 else:
@@ -544,9 +537,7 @@ class Step13AdaptiveExperimentRunner:
                 # Collect phase metrics
                 t_phase_dur = max(0.001, time.perf_counter() - t_phase_start)
                 phase_snap = collector.snapshot()
-                phase_comp_resps = [
-                    r for r in phase_responses if isinstance(r, InferenceResponse)
-                ]
+                phase_comp_resps = [r for r in phase_responses if isinstance(r, InferenceResponse)]
                 all_completed_responses.extend(phase_comp_resps)
 
                 # Extract exact end-to-end total latencies and queue wait from scheduler records
@@ -606,9 +597,7 @@ class Step13AdaptiveExperimentRunner:
                     else 0.0
                 )
                 p_avg_q_wait = (
-                    sum(phase_queue_waits) / len(phase_queue_waits)
-                    if phase_queue_waits
-                    else 0.0
+                    sum(phase_queue_waits) / len(phase_queue_waits) if phase_queue_waits else 0.0
                 )
                 p_avg_exec = (
                     sum(phase_exec_latencies) / len(phase_exec_latencies)
@@ -651,7 +640,7 @@ class Step13AdaptiveExperimentRunner:
                     if intended_tunable
                     else active_cfg_str
                 )
-                is_under_intended = (active_cfg_str == intended_str)
+                is_under_intended = active_cfg_str == intended_str
                 dwell_frac = 1.0 if (is_under_intended or not is_adaptive) else 0.85
 
                 phase_adaptations = len(adaptation_events) - phase_adaptations_start
@@ -823,24 +812,40 @@ class Step13AdaptiveExperimentRunner:
 
         # Baseline Comparison
         tput_delta_cons = (
-            ((res_adaptive.overall_throughput_rps - res_conservative.overall_throughput_rps)
-             / res_conservative.overall_throughput_rps * 100.0)
-            if res_conservative.overall_throughput_rps > 0 else 0.0
+            (
+                (res_adaptive.overall_throughput_rps - res_conservative.overall_throughput_rps)
+                / res_conservative.overall_throughput_rps
+                * 100.0
+            )
+            if res_conservative.overall_throughput_rps > 0
+            else 0.0
         )
         tput_delta_aggr = (
-            ((res_adaptive.overall_throughput_rps - res_aggressive.overall_throughput_rps)
-             / res_aggressive.overall_throughput_rps * 100.0)
-            if res_aggressive.overall_throughput_rps > 0 else 0.0
+            (
+                (res_adaptive.overall_throughput_rps - res_aggressive.overall_throughput_rps)
+                / res_aggressive.overall_throughput_rps
+                * 100.0
+            )
+            if res_aggressive.overall_throughput_rps > 0
+            else 0.0
         )
         p95_delta_cons = (
-            ((res_adaptive.overall_p95_latency_ms - res_conservative.overall_p95_latency_ms)
-             / res_conservative.overall_p95_latency_ms * 100.0)
-            if res_conservative.overall_p95_latency_ms > 0 else 0.0
+            (
+                (res_adaptive.overall_p95_latency_ms - res_conservative.overall_p95_latency_ms)
+                / res_conservative.overall_p95_latency_ms
+                * 100.0
+            )
+            if res_conservative.overall_p95_latency_ms > 0
+            else 0.0
         )
         p95_delta_aggr = (
-            ((res_adaptive.overall_p95_latency_ms - res_aggressive.overall_p95_latency_ms)
-             / res_aggressive.overall_p95_latency_ms * 100.0)
-            if res_aggressive.overall_p95_latency_ms > 0 else 0.0
+            (
+                (res_adaptive.overall_p95_latency_ms - res_aggressive.overall_p95_latency_ms)
+                / res_aggressive.overall_p95_latency_ms
+                * 100.0
+            )
+            if res_aggressive.overall_p95_latency_ms > 0
+            else 0.0
         )
 
         detect_times = [e.time_to_detect_ms for e in res_adaptive.adaptation_events]
@@ -961,9 +966,7 @@ def classify_step13_findings(
             "Superiority of deterministic rule-based control over complex learned ML/RL policies "
             "on unseen heterogeneous architectures."
         ),
-        (
-            "Zero-overhead reconfiguration under extreme multi-tenant concurrent traffic."
-        ),
+        ("Zero-overhead reconfiguration under extreme multi-tenant concurrent traffic."),
     ]
 
     return {
@@ -986,8 +989,7 @@ def format_step13_report(report: Step13AdaptiveReport) -> str:
     lines.append(f" Engine Verified: {report.backend_execution_confirmed} (Real Hardware Engine)")
     lines.append(f" Engine ID      : {report.engine_instance_id}")
     lines.append(
-        f" GPU Model      : {report.environment.gpu_name} "
-        f"(count={report.environment.gpu_count})"
+        f" GPU Model      : {report.environment.gpu_name} (count={report.environment.gpu_count})"
     )
     lines.append(
         f" Engine Cycles  : {report.engine_initialization_count} init, "

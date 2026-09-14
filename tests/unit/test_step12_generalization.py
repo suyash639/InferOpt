@@ -975,5 +975,3 @@ class TestStep12ScientificAuditPass:
         assert "[PROVEN]" in q_ans["1_objective_differentiation"]
         assert "[SUGGESTED]" in q_ans["2_validation_reproducibility"]
         assert "[SUGGESTED]" in q_ans["6_measurement_noise_sensitivity"]
-
-

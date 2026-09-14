@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from inferopt.backends.mock import MockBackend
@@ -131,6 +132,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run Step 13 Online Adaptive Control & Dynamic Reconfiguration Experiment.",
     )
     parser.add_argument(
+        "--experiment-step14",
+        action="store_true",
+        help="Run Step 14 SLA-Aware Online Adaptive Control "
+        "& Dynamic Pareto Latency Guardrailing Experiment.",
+    )
+    parser.add_argument(
+        "--target-slo-p95-ms",
+        type=float,
+        default=180.0,
+        help="Target p95 total latency SLO in milliseconds for Step 14 (default: 180.0).",
+    )
+    parser.add_argument(
         "--phase-sequence",
         nargs="+",
         default=None,
@@ -140,7 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--num-requests-per-phase",
         type=int,
         default=16,
-        help="Number of requests per phase in Step 13 (default: 16).",
+        help="Number of requests per phase in Step 13/14 (default: 16).",
     )
     parser.add_argument(
         "--workloads",
@@ -202,6 +215,81 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def run_benchmark_cli(args: argparse.Namespace) -> int:
     """Execute benchmark run with arguments parsed from CLI."""
+    # Step 14: SLA-Aware Online Adaptive Control & Dynamic Pareto Latency Guardrailing Experiment
+    if args.experiment_step14:
+        from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID, VLLMBackend, VLLMConfig
+        from inferopt.benchmarks.step14_sla_adaptive import (
+            Step14SLAExperimentRunner,
+            format_step14_report,
+        )
+        from inferopt.optimizer.sla_models import TargetSLO
+
+        model_id = args.model if args.model is not None else DEFAULT_VLLM_MODEL_ID
+        num_reqs = args.num_requests_per_phase if args.num_requests_per_phase is not None else 16
+        target_p95 = args.target_slo_p95_ms if args.target_slo_p95_ms is not None else 180.0
+        out_path = (
+            args.output
+            if args.output is not None
+            else "benchmarks/results/step14/step14_sla_adaptive_report.json"
+        )
+
+        print("\n" + "=" * 80)
+        print("  STARTING INFEROPT STEP 14 SLA-AWARE ONLINE ADAPTIVE CONTROL EXPERIMENT")
+        print("=" * 80)
+        print(f"  Model ID:            {model_id}")
+        print(f"  Target SLO (p95):    {target_p95:.1f} ms")
+        print(f"  Requests Per Phase:  {num_reqs}")
+        print(f"  Seed:                {args.seed}")
+        print(f"  Enforce Eager:       {args.enforce_eager}")
+        print(f"  Output Path:         {out_path}")
+        print("=" * 80 + "\n")
+
+        step14_backend_choice = args.backend if args.backend is not None else "vllm"
+
+        step14_backend_inst: InferenceBackend
+        if step14_backend_choice == "vllm":
+            step14_backend_inst = VLLMBackend(
+                config=VLLMConfig(
+                    model=model_id,
+                    enforce_eager=args.enforce_eager,
+                )
+            )
+        elif step14_backend_choice == "mlx":
+            from inferopt.backends.mlx import DEFAULT_MODEL_ID as DEFAULT_MLX_MODEL_ID
+            from inferopt.backends.mlx import MLXBackend
+
+            step14_backend_inst = MLXBackend(model_id=args.model or DEFAULT_MLX_MODEL_ID)
+        else:
+            step14_backend_inst = MockBackend(default_latency_sec=0.005)
+
+        target_slo = TargetSLO(p95_latency_ms=target_p95)
+        runner_step14 = Step14SLAExperimentRunner(
+            model_id=model_id,
+            target_slo=target_slo,
+        )
+
+        try:
+            if hasattr(step14_backend_inst, "load_model"):
+                await step14_backend_inst.load_model()
+
+            report_step14 = await runner_step14.run_experiment(
+                backend=step14_backend_inst,
+                num_requests_per_phase=num_reqs,
+                seed=args.seed,
+            )
+        finally:
+            if hasattr(step14_backend_inst, "unload_model"):
+                await step14_backend_inst.unload_model()
+
+        print()
+        print(format_step14_report(report_step14))
+        if out_path:
+            runner_step14.save_report(report_step14, Path(out_path).parent)
+            print(f"\nSaved structured Step 14 SLA adaptive control JSON report to: {out_path}")
+
+        step14_summary = report_step14.conditions.get("SLA_AWARE_ADAPTIVE")
+        return 0 if (step14_summary is not None and step14_summary.integrity_valid) else 1
+
     # Step 13: Online Adaptive Control & Dynamic Reconfiguration Experiment
     if args.experiment_step13:
         from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID, VLLMBackend, VLLMConfig
@@ -228,23 +316,23 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
         print(f"  Output Path:         {out_path}")
         print("=" * 80 + "\n")
 
-        backend_choice = args.backend if args.backend is not None else "vllm"
+        step13_backend_choice = args.backend if args.backend is not None else "vllm"
 
-        backend_inst: InferenceBackend
-        if backend_choice == "vllm":
-            backend_inst = VLLMBackend(
+        step13_backend_inst: InferenceBackend
+        if step13_backend_choice == "vllm":
+            step13_backend_inst = VLLMBackend(
                 config=VLLMConfig(
                     model=model_id,
                     enforce_eager=args.enforce_eager,
                 )
             )
-        elif backend_choice == "mlx":
+        elif step13_backend_choice == "mlx":
             from inferopt.backends.mlx import DEFAULT_MODEL_ID as DEFAULT_MLX_MODEL_ID
             from inferopt.backends.mlx import MLXBackend
 
-            backend_inst = MLXBackend(model_id=args.model or DEFAULT_MLX_MODEL_ID)
+            step13_backend_inst = MLXBackend(model_id=args.model or DEFAULT_MLX_MODEL_ID)
         else:
-            backend_inst = MockBackend(default_latency_sec=0.005)
+            step13_backend_inst = MockBackend(default_latency_sec=0.005)
 
         runner_step13 = Step13AdaptiveExperimentRunner(
             model_id=model_id,
@@ -252,17 +340,17 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
         )
 
         try:
-            if hasattr(backend_inst, "load_model"):
-                await backend_inst.load_model()
+            if hasattr(step13_backend_inst, "load_model"):
+                await step13_backend_inst.load_model()
 
             report_step13 = await runner_step13.run_experiment(
-                backend=backend_inst,
+                backend=step13_backend_inst,
                 num_requests_per_phase=num_reqs,
                 seed=args.seed,
             )
         finally:
-            if hasattr(backend_inst, "unload_model"):
-                await backend_inst.unload_model()
+            if hasattr(step13_backend_inst, "unload_model"):
+                await step13_backend_inst.unload_model()
 
         print()
         print(format_step13_report(report_step13))
@@ -270,8 +358,8 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
             report_step13.save_json(out_path)
             print(f"\nSaved structured Step 13 online adaptive control JSON report to: {out_path}")
 
-        adaptive_summary = report_step13.conditions.get("ADAPTIVE_INFEROPT")
-        return 0 if (adaptive_summary is not None and adaptive_summary.integrity_valid) else 1
+        step13_summary = report_step13.conditions.get("ADAPTIVE_INFEROPT")
+        return 0 if (step13_summary is not None and step13_summary.integrity_valid) else 1
 
     # Step 12: Multi-Workload Generalization Experiment
     if args.experiment_step12:

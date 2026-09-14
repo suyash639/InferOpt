@@ -335,9 +335,7 @@ class TestAdaptiveControllerRegimeIntegration:
             p95_latency_ms=80.0,
             reason="Light traffic",
         )
-        dec2 = controller.evaluate_regime(
-            snap, reg_res_light, current_config=dec1.proposed_config
-        )
+        dec2 = controller.evaluate_regime(snap, reg_res_light, current_config=dec1.proposed_config)
         assert dec2.decision_type == AdaptationDecisionType.COOLDOWN
         assert "Dwell time active" in dec2.reason or "Cooldown active" in dec2.reason
 
@@ -466,8 +464,7 @@ class TestOnlineDynamicReconfigurationScheduler:
 
             # Submit concurrent requests under new config
             reqs = [
-                InferenceRequest(model="mock", prompt=f"Req {i}", max_tokens=16)
-                for i in range(8)
+                InferenceRequest(model="mock", prompt=f"Req {i}", max_tokens=16) for i in range(8)
             ]
             tasks = [scheduler.submit(r) for r in reqs]
             resps = await asyncio.gather(*tasks)
@@ -775,6 +772,7 @@ class TestStep13HardRuntimeInvariants:
             fake_vllm.generate_calls += 1
             fake_vllm.total_requests_executed += 1
             from inferopt.core.models import InferenceResponse
+
             return InferenceResponse(
                 request_id=req.request_id,
                 generated_text="test output",
@@ -788,6 +786,7 @@ class TestStep13HardRuntimeInvariants:
             fake_vllm.generate_batch_calls += 1
             fake_vllm.total_requests_executed += len(batch.requests)
             from inferopt.core.models import InferenceResponse
+
             return [
                 InferenceResponse(
                     request_id=r.request_id,
