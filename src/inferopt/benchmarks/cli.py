@@ -138,10 +138,24 @@ def build_parser() -> argparse.ArgumentParser:
         "& Dynamic Pareto Latency Guardrailing Experiment.",
     )
     parser.add_argument(
+        "--experiment-step15",
+        action="store_true",
+        help="Run Step 15 Multi-Model Generalization & Cross-Model Optimization Experiment.",
+    )
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        default=None,
+        help=(
+            "List of model IDs to evaluate in Step 15 multi-model benchmark "
+            "(e.g. Qwen/Qwen2.5-0.5B-Instruct meta-llama/Llama-3.2-1B-Instruct)."
+        ),
+    )
+    parser.add_argument(
         "--target-slo-p95-ms",
         type=float,
         default=180.0,
-        help="Target p95 total latency SLO in milliseconds for Step 14 (default: 180.0).",
+        help="Target p95 total latency SLO in milliseconds for Step 14/15 (default: 180.0).",
     )
     parser.add_argument(
         "--phase-sequence",
@@ -215,6 +229,115 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def run_benchmark_cli(args: argparse.Namespace) -> int:
     """Execute benchmark run with arguments parsed from CLI."""
+    # Step 15: Multi-Model Generalization & Cross-Model Optimization Experiment
+    if args.experiment_step15:
+        from inferopt.benchmarks.step15_multi_model import (
+            DEFAULT_STEP15_MODELS,
+            ModelSpec,
+            Step15MultiModelRunner,
+            format_step15_report,
+        )
+        from inferopt.optimizer.sla_models import TargetSLO
+
+        models: tuple[ModelSpec, ...]
+        if args.models:
+            custom_models = []
+            for m_str in args.models:
+                lower_m = m_str.lower()
+                fam = (
+                    "qwen2.5"
+                    if "qwen" in lower_m
+                    else ("llama3.2" if "llama" in lower_m else "unknown")
+                )
+                size = (
+                    "0.5B"
+                    if "0.5b" in lower_m
+                    else ("1.5B" if "1.5b" in lower_m else ("1B" if "1b" in lower_m else "custom"))
+                )
+                custom_models.append(
+                    ModelSpec(
+                        model_id=m_str,
+                        model_family=fam,
+                        parameter_size_label=size,
+                    )
+                )
+            models = tuple(custom_models)
+        elif args.model:
+            lower_m = args.model.lower()
+            fam = (
+                "qwen2.5"
+                if "qwen" in lower_m
+                else ("llama3.2" if "llama" in lower_m else "unknown")
+            )
+            size = (
+                "0.5B"
+                if "0.5b" in lower_m
+                else ("1.5B" if "1.5b" in lower_m else ("1B" if "1b" in lower_m else "custom"))
+            )
+            models = (
+                ModelSpec(
+                    model_id=args.model,
+                    model_family=fam,
+                    parameter_size_label=size,
+                ),
+            )
+        else:
+            models = DEFAULT_STEP15_MODELS
+
+        num_reqs = args.num_requests_per_phase if args.num_requests_per_phase is not None else 8
+        target_p95 = args.target_slo_p95_ms if args.target_slo_p95_ms is not None else 180.0
+        out_dir = args.output if args.output is not None else "benchmarks/results/step15"
+
+        print("\n" + "=" * 80)
+        print("  STARTING INFEROPT STEP 15 MULTI-MODEL GENERALIZATION EXPERIMENT")
+        print("=" * 80)
+        print(f"  Target Models:       {[m.model_id for m in models]}")
+        print(f"  Target SLO (p95):    {target_p95:.1f} ms")
+        print(f"  Requests Per Phase:  {num_reqs}")
+        print(f"  Seed:                {args.seed}")
+        print(f"  Backend:             {args.backend or 'vllm'}")
+        print(f"  Enforce Eager:       {args.enforce_eager}")
+        print(f"  Output Directory:    {out_dir}")
+        print("=" * 80 + "\n")
+
+        backend_type = args.backend or "vllm"
+        target_slo = TargetSLO(p95_latency_ms=target_p95)
+        runner_step15 = Step15MultiModelRunner(
+            models=models,
+            target_slo=target_slo,
+            enforce_eager=args.enforce_eager,
+        )
+
+        mock_backend: Any = None
+        if backend_type == "mock":
+            mock_backend = MockBackend(default_latency_sec=0.005)
+
+        report_step15 = await runner_step15.run_cross_model_benchmark(
+            backend_type=backend_type,
+            backend_override=mock_backend,
+            requests_per_phase=num_reqs,
+            seed=args.seed,
+        )
+
+        print()
+        print(format_step15_report(report_step15))
+        if out_dir:
+            summary_path, raw_path, analysis_path = runner_step15.save_reports(
+                report_step15, Path(out_dir)
+            )
+            print(f"\nSaved structured Step 15 reports to: {out_dir}")
+            print(f"  - Summary:   {summary_path}")
+            print(f"  - Raw Data:  {raw_path}")
+            print(f"  - Analysis:  {analysis_path}")
+
+        successful_runs = [r for r in report_step15.results_by_model.values() if r.is_successful]
+        if not successful_runs:
+            return 1
+        all_passed = all(
+            cond.integrity_valid for r in successful_runs for cond in r.conditions.values()
+        )
+        return 0 if all_passed else 1
+
     # Step 14: SLA-Aware Online Adaptive Control & Dynamic Pareto Latency Guardrailing Experiment
     if args.experiment_step14:
         from inferopt.backends.vllm import DEFAULT_VLLM_MODEL_ID, VLLMBackend, VLLMConfig
