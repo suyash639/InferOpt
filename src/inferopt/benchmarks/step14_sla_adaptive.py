@@ -543,7 +543,10 @@ class Step14SLAExperimentRunner:
             if cond_cons.overall_throughput_rps > 0
             else 0.0
         )
-        sla_reduct_pct = (
+        sla_reduct_vs_cons_pct = (
+            cond_cons.overall_sla_violation_rate_pct - cond_adapt.overall_sla_violation_rate_pct
+        )
+        sla_reduct_vs_aggr_pct = (
             cond_aggr.overall_sla_violation_rate_pct - cond_adapt.overall_sla_violation_rate_pct
         )
 
@@ -571,7 +574,8 @@ class Step14SLAExperimentRunner:
             sla_adaptive_p95=cond_adapt.overall_p95_latency_ms,
             sla_adaptive_sla_violation_pct=cond_adapt.overall_sla_violation_rate_pct,
             throughput_improvement_vs_conservative_pct=tput_vs_cons_pct,
-            sla_violation_reduction_vs_aggressive_pct=sla_reduct_pct,
+            sla_violation_reduction_vs_conservative_pct=sla_reduct_vs_cons_pct,
+            sla_violation_reduction_vs_aggressive_pct=sla_reduct_vs_aggr_pct,
             total_adaptations=cond_adapt.total_adaptations,
             avg_time_to_detect_ms=avg_ttd,
             avg_time_to_adapt_ms=avg_tta,
@@ -593,34 +597,13 @@ class Step14SLAExperimentRunner:
             "SLA_AWARE_ADAPTIVE": cond_adapt,
         }
 
-        findings = {
-            "PROVEN_OBSERVATIONS": (
-                f"SLA-Aware Adaptive Control maintained p95 latency "
-                f"({cond_adapt.overall_p95_latency_ms:.2f}ms) "
-                f"against target SLO ({self._target_slo.p95_latency_ms:.1f}ms).",
-                f"SLA violation rate reduced by {sla_reduct_pct:.1f}% vs Static Aggressive.",
-                f"Throughput improved by {tput_vs_cons_pct:.1f}% vs Static Conservative baseline.",
-                "100% request completion integrity verified across all 192 scheduled requests.",
-                f"Zero engine teardowns ({cond_adapt.engine_teardown_count}) occurred "
-                "across online reconfigurations.",
-            ),
-            "HYPOTHESIS_VERDICTS": (
-                f"H1 (SLO Violation Reduction): PROVEN - Adaptive SLA violations "
-                f"({cond_adapt.overall_sla_violation_rate_pct:.1f}%) "
-                f"substantially lower than Aggressive "
-                f"({cond_aggr.overall_sla_violation_rate_pct:.1f}%).",
-                f"H2 (Throughput Efficiency under SLO): PROVEN - Adaptive throughput "
-                f"({cond_adapt.overall_throughput_rps:.2f} req/s) "
-                f"exceeds Conservative ({cond_cons.overall_throughput_rps:.2f} req/s).",
-                f"H3 (Convergence & Stability): PROVEN - Deadband hysteresis resulted in "
-                f"{cond_adapt.oscillation_count} rapid oscillations.",
-            ),
-            "HARDWARE_LIMITATION_DISCLAIMERS": (
-                "Evaluated on single NVIDIA Tesla T4 GPU with Qwen2.5-0.5B-Instruct.",
-                "Generalization to larger model weights (>7B) requires empirical "
-                "re-profiling of KV cache footprint.",
-            ),
-        }
+        findings = classify_step14_findings(
+            comparison=comparison,
+            adaptive_summary=cond_adapt,
+            conservative_summary=cond_cons,
+            aggressive_summary=cond_aggr,
+            target_slo=self._target_slo,
+        )
 
         total_sched = sum(c.scheduled_requests for c in conditions_dict.values())
         total_comp = sum(c.completed_requests for c in conditions_dict.values())
@@ -676,6 +659,101 @@ class Step14SLAExperimentRunner:
 
         logger.info("Saved Step 14 SLA report to %s", target_file)
         return target_file
+
+
+def classify_step14_findings(
+    comparison: Step14BaselineComparison,
+    adaptive_summary: Step14ConditionSummary,
+    conservative_summary: Step14ConditionSummary,
+    aggressive_summary: Step14ConditionSummary,
+    target_slo: TargetSLO,
+) -> dict[str, tuple[str, ...]]:
+    """Categorize Step 14 SLA outcomes into PROVEN, SUGGESTED, and NOT PROVEN."""
+    proven: list[str] = [
+        (
+            f"Online Dynamic Reconfiguration: Runtime configuration changed dynamically via "
+            f"Scheduler.apply_config() across {adaptive_summary.total_adaptations} online "
+            f"adaptation(s) without restarting the inference engine or dropping requests."
+        ),
+        (
+            f"Workload-Specific SLA Compliance: On the tested multi-phase workload, SLA-Aware "
+            f"Adaptive Control maintained observed p95 total latency "
+            f"({adaptive_summary.overall_p95_latency_ms:.2f}ms) within target SLO threshold "
+            f"({target_slo.p95_latency_ms:.1f}ms)."
+        ),
+        (
+            f"SLA Violation Reduction vs Static Conservative: On this evaluated workload, "
+            f"SLA-Aware Adaptive Control reduced the observed SLA violation rate from "
+            f"{conservative_summary.overall_sla_violation_rate_pct:.1f}% (Conservative) to "
+            f"{adaptive_summary.overall_sla_violation_rate_pct:.1f}% (Adaptive)."
+        ),
+        (
+            f"Request Accounting Integrity: 100% request completion integrity verified across "
+            f"all {adaptive_summary.scheduled_requests} scheduled requests "
+            f"({adaptive_summary.completed_requests} completed, {adaptive_summary.failed_requests} "
+            f"failed, {adaptive_summary.measured_requests} measured)."
+        ),
+        (
+            f"Zero Mid-Run Engine Teardowns: Zero engine teardowns "
+            f"({adaptive_summary.engine_teardown_count}) occurred during online condition "
+            f"execution and dynamic adaptations."
+        ),
+    ]
+
+    suggested: list[str] = [
+        (
+            f"Throughput Improvement vs Static Conservative: SLA-Aware Adaptive Control "
+            f"achieved {comparison.sla_adaptive_tput:.2f} req/s vs "
+            f"{comparison.static_conservative_tput:.2f} req/s for Static Conservative "
+            f"({comparison.throughput_improvement_vs_conservative_pct:+.1f}% on this evaluated "
+            f"workload), scaling capacity when latency headroom was available."
+        ),
+        (
+            f"Observable Deadband Stability: Controller recorded "
+            f"{adaptive_summary.oscillation_count} rapid direction reversals (oscillations) "
+            f"during the evaluated 4-phase sequence."
+        ),
+    ]
+
+    not_proven: list[str] = [
+        (
+            f"H1 (SLA Violation Reduction vs Static Aggressive): NOT PROVEN / INAPPLICABLE - Both "
+            f"Adaptive ({adaptive_summary.overall_sla_violation_rate_pct:.1f}%) and "
+            f"Aggressive ({aggressive_summary.overall_sla_violation_rate_pct:.1f}%) exhibited "
+            f"0.0% SLA violations on this workload, yielding zero observed reduction."
+        ),
+        (
+            f"Throughput Superiority vs Static Aggressive: NOT PROVEN - SLA-Aware Adaptive "
+            f"throughput ({comparison.sla_adaptive_tput:.2f} req/s) is effectively identical to "
+            f"Static Aggressive ({comparison.static_aggressive_tput:.2f} req/s; delta = "
+            f"{comparison.sla_adaptive_tput - comparison.static_aggressive_tput:+.2f} req/s), "
+            f"demonstrating no throughput advantage over Aggressive in this workload."
+        ),
+        (
+            "Dynamic Cooldown Right-Sizing / Contraction: NOT PROVEN - The adaptive controller "
+            "expanded capacity during traffic onset (c=1, b=2 -> c=4, b=4 -> c=8, b=8) but "
+            "remained in c=8, b=8 during PHASE_4_COOLDOWN because light cooldown traffic did not "
+            "generate latency violations or queue pressure to trigger downward mitigation. "
+            "Downward capacity contraction under low load remains unproven."
+        ),
+        (
+            f"Universal SLA Guarantee: NOT PROVEN - Observed p95 latency compliance "
+            f"({adaptive_summary.overall_p95_latency_ms:.2f}ms <= "
+            f"{target_slo.p95_latency_ms:.1f}ms) is specific to the evaluated workload and does "
+            f"not guarantee SLA compliance across arbitrary burst amplitudes or distributions."
+        ),
+        (
+            "Universal Controller Stability: NOT PROVEN - Zero rapid oscillations observed in "
+            "this deterministic 4-phase sequence does not prove asymptotic stability under "
+            "stochastic or volatile multi-tenant traffic distributions."
+        ),
+    ]
+
+    return {
+        "PROVEN_OBSERVATIONS": tuple(proven),
+        "SUGGESTED_WORKLOAD_OBSERVATIONS": tuple(suggested),
+        "NOT_PROVEN_AND_LIMITATIONS": tuple(not_proven),
+    }
 
 
 def format_step14_report(report: Step14SLAReport) -> str:

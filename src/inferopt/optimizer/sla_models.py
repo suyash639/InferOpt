@@ -256,6 +256,10 @@ class Step14BaselineComparison(BaseModel):
     throughput_improvement_vs_conservative_pct: float = Field(
         description="Throughput delta % vs Static Conservative"
     )
+    sla_violation_reduction_vs_conservative_pct: float = Field(
+        default=0.0,
+        description="SLA violation rate reduction vs Static Conservative",
+    )
     sla_violation_reduction_vs_aggressive_pct: float = Field(
         description="SLA violation rate reduction vs Static Aggressive"
     )

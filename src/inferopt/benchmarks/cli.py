@@ -281,6 +281,14 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
             if hasattr(step14_backend_inst, "unload_model"):
                 await step14_backend_inst.unload_model()
 
+        # Update teardown count to accurately reflect completed lifecycle after unload
+        final_teardowns_14 = getattr(
+            step14_backend_inst, "engine_teardowns", report_step14.engine_teardown_count
+        )
+        report_step14 = report_step14.model_copy(
+            update={"engine_teardown_count": final_teardowns_14}
+        )
+
         print()
         print(format_step14_report(report_step14))
         if out_path:
@@ -351,6 +359,14 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
         finally:
             if hasattr(step13_backend_inst, "unload_model"):
                 await step13_backend_inst.unload_model()
+
+        # Update teardown count to accurately reflect completed lifecycle after unload
+        final_teardowns_13 = getattr(
+            step13_backend_inst, "engine_teardowns", report_step13.engine_teardown_count
+        )
+        report_step13 = report_step13.model_copy(
+            update={"engine_teardown_count": final_teardowns_13}
+        )
 
         print()
         print(format_step13_report(report_step13))

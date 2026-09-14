@@ -52,11 +52,11 @@ class MockBackend(InferenceBackend, BatchInferenceBackend):
 
     async def load_model(self) -> None:
         """Mock model loading (idempotent no-op)."""
-        pass
+        self._engine_initializations = 1
 
     async def unload_model(self) -> None:
-        """Mock model unloading (increments teardown count)."""
-        self._engine_teardowns += 1
+        """Mock model unloading (idempotent no-op)."""
+        self._engine_teardowns = 1
 
     @property
     def backend_name(self) -> str:
