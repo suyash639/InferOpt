@@ -143,6 +143,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run Step 15 Multi-Model Generalization & Cross-Model Optimization Experiment.",
     )
     parser.add_argument(
+        "--experiment-step16",
+        action="store_true",
+        help="Run Step 16 Heavy-Load Scalability & Saturation Characterization Experiment.",
+    )
+    parser.add_argument(
         "--models",
         nargs="+",
         default=None,
@@ -152,10 +157,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--loads",
+        nargs="+",
+        type=int,
+        default=None,
+        help="List of offered request load levels for Step 16 (default: 16 32 64 128 256).",
+    )
+    parser.add_argument(
         "--target-slo-p95-ms",
         type=float,
         default=180.0,
-        help="Target p95 total latency SLO in milliseconds for Step 14/15 (default: 180.0).",
+        help="Target p95 total latency SLO in milliseconds for Step 14/15/16 (default: 180.0).",
     )
     parser.add_argument(
         "--phase-sequence",
@@ -229,6 +241,75 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def run_benchmark_cli(args: argparse.Namespace) -> int:
     """Execute benchmark run with arguments parsed from CLI."""
+    # Step 16: Heavy-Load Scalability & Saturation Characterization Experiment
+    if args.experiment_step16:
+        from inferopt.benchmarks.step16_scalability import (
+            DEFAULT_STEP16_LOAD_LEVELS,
+            DEFAULT_STEP16_MODEL_ID,
+            Step16ScalabilityRunner,
+            format_step16_report,
+        )
+        from inferopt.optimizer.sla_models import TargetSLO
+
+        model_id = args.model if args.model is not None else DEFAULT_STEP16_MODEL_ID
+        loads = tuple(args.loads) if args.loads is not None else DEFAULT_STEP16_LOAD_LEVELS
+        target_p95 = args.target_slo_p95_ms if args.target_slo_p95_ms is not None else 180.0
+        repetitions = args.repetitions if args.repetitions is not None else 1
+        warmup = args.warmup if args.warmup is not None else 0
+        out_dir = args.output if args.output is not None else "benchmarks/results/step16"
+
+        print("\n" + "=" * 80)
+        print("  STARTING INFEROPT STEP 16 HEAVY-LOAD SCALABILITY EXPERIMENT")
+        print("=" * 80)
+        print(f"  Model ID:            {model_id}")
+        print(f"  Load Levels:         {list(loads)}")
+        print(f"  Target SLO (p95):    {target_p95:.1f} ms")
+        print(f"  Repetitions:         {repetitions}")
+        print(f"  Warmup:              {warmup}")
+        print(f"  Seed:                {args.seed}")
+        print(f"  Backend:             {args.backend or 'vllm'}")
+        print(f"  Enforce Eager:       {args.enforce_eager}")
+        print(f"  Output Directory:    {out_dir}")
+        print("=" * 80 + "\n")
+
+        step16_backend_type = args.backend or "vllm"
+        step16_target_slo = TargetSLO(p95_latency_ms=target_p95)
+        runner_step16 = Step16ScalabilityRunner(
+            model_id=model_id,
+            load_levels=loads,
+            target_slo=step16_target_slo,
+            enforce_eager=args.enforce_eager,
+        )
+
+        step16_mock_backend: Any = None
+        if step16_backend_type == "mock":
+            step16_mock_backend = MockBackend(default_latency_sec=0.005)
+
+        report_step16 = await runner_step16.run_experiment(
+            backend=step16_mock_backend,
+            repetitions=repetitions,
+            warmup_count=warmup,
+            seed=args.seed,
+        )
+
+        print()
+        print(format_step16_report(report_step16))
+        if out_dir:
+            summary_path, raw_path, analysis_path = runner_step16.save_reports(
+                report_step16, Path(out_dir)
+            )
+            print(f"\nSaved structured Step 16 reports to: {out_dir}")
+            print(f"  - Summary:   {summary_path}")
+            print(f"  - Raw Data:  {raw_path}")
+            print(f"  - Analysis:  {analysis_path}")
+
+        all_passed = all(
+            cond.all_repetitions_valid
+            for load_res in report_step16.results_by_load.values()
+            for cond in load_res.conditions.values()
+        )
+        return 0 if all_passed else 1
+
     # Step 15: Multi-Model Generalization & Cross-Model Optimization Experiment
     if args.experiment_step15:
         from inferopt.benchmarks.step15_multi_model import (
