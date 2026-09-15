@@ -148,6 +148,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run Step 16 Heavy-Load Scalability & Saturation Characterization Experiment.",
     )
     parser.add_argument(
+        "--experiment-step17",
+        action="store_true",
+        help="Run Step 17 Long-Context & Production-Like Traffic Validation Experiment.",
+    )
+    parser.add_argument(
+        "--context-profiles",
+        nargs="+",
+        default=None,
+        help="Context profiles to evaluate in Step 17 (e.g. SHORT MEDIUM LONG XLONG).",
+    )
+    parser.add_argument(
+        "--traffic-profiles",
+        nargs="+",
+        default=None,
+        help="Traffic patterns for Step 17 (e.g. STEADY BURSTY MIXED LONG_CONTEXT_BURST).",
+    )
+    parser.add_argument(
         "--models",
         nargs="+",
         default=None,
@@ -161,13 +178,13 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         type=int,
         default=None,
-        help="List of offered request load levels for Step 16 (default: 16 32 64 128 256).",
+        help="List of offered request load levels for Step 16/17 (e.g. 16 32 64).",
     )
     parser.add_argument(
         "--target-slo-p95-ms",
         type=float,
         default=180.0,
-        help="Target p95 total latency SLO in milliseconds for Step 14/15/16 (default: 180.0).",
+        help="Target p95 total latency SLO in milliseconds for Step 14/15/16/17.",
     )
     parser.add_argument(
         "--phase-sequence",
@@ -215,7 +232,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--warmup",
         type=int,
         default=None,
-        help="Warmup requests before timing (default: 2 for vLLM/step11/step16, 1 otherwise).",
+        help="Warmup requests before timing (default: 2 for vLLM/step11/step16/17, 1 otherwise).",
     )
     parser.add_argument(
         "--repetitions",
@@ -241,6 +258,119 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def run_benchmark_cli(args: argparse.Namespace) -> int:
     """Execute benchmark run with arguments parsed from CLI."""
+    # Step 17: Long-Context & Production-Like Traffic Validation Experiment
+    if args.experiment_step17:
+        from inferopt.benchmarks.step17_long_context import (
+            DEFAULT_STEP17_LOAD_LEVELS,
+            DEFAULT_STEP17_MODEL_ID,
+            DEFAULT_STEP17_TARGET_P95_MS,
+            ContextProfile,
+            Step17BenchmarkRunner,
+            TrafficProfile,
+            format_step17_report,
+        )
+        from inferopt.optimizer.sla_models import TargetSLO
+
+        model_id = args.model if args.model is not None else DEFAULT_STEP17_MODEL_ID
+        loads = tuple(args.loads) if args.loads is not None else DEFAULT_STEP17_LOAD_LEVELS
+        # For Step 17, default target SLO is 5000.0ms unless explicitly overridden
+        target_p95 = (
+            args.target_slo_p95_ms
+            if args.target_slo_p95_ms != 180.0
+            else DEFAULT_STEP17_TARGET_P95_MS
+        )
+        repetitions = args.repetitions if args.repetitions is not None else 1
+        warmup = args.warmup if args.warmup is not None else 2
+        out_dir = args.output if args.output is not None else "benchmarks/results/step17"
+
+        ctx_profs: list[ContextProfile] = []
+        if args.context_profiles:
+            for cp_str in args.context_profiles:
+                try:
+                    ctx_profs.append(ContextProfile(cp_str.upper()))
+                except ValueError:
+                    print(f"Warning: Unknown context profile '{cp_str}', ignoring.")
+        if not ctx_profs:
+            ctx_profs = [
+                ContextProfile.SHORT,
+                ContextProfile.MEDIUM,
+                ContextProfile.LONG,
+                ContextProfile.XLONG,
+            ]
+
+        traf_profs: list[TrafficProfile] = []
+        if args.traffic_profiles:
+            for tp_str in args.traffic_profiles:
+                try:
+                    traf_profs.append(TrafficProfile(tp_str.upper()))
+                except ValueError:
+                    print(f"Warning: Unknown traffic profile '{tp_str}', ignoring.")
+        if not traf_profs:
+            traf_profs = [
+                TrafficProfile.STEADY,
+                TrafficProfile.BURSTY,
+                TrafficProfile.MIXED,
+                TrafficProfile.LONG_CONTEXT_BURST,
+            ]
+
+        print("\n" + "=" * 80)
+        print("  STARTING INFEROPT STEP 17 LONG-CONTEXT & PRODUCTION TRAFFIC EXPERIMENT")
+        print("=" * 80)
+        print(f"  Model ID:            {model_id}")
+        print(f"  Context Profiles:    {[c.value for c in ctx_profs]}")
+        print(f"  Traffic Profiles:    {[t.value for t in traf_profs]}")
+        print(f"  Load Levels:         {list(loads)}")
+        print(f"  Target SLO (p95):    {target_p95:.1f} ms")
+        print(f"  Repetitions:         {repetitions}")
+        print(f"  Warmup:              {warmup}")
+        print(f"  Seed:                {args.seed}")
+        print(f"  Backend:             {args.backend or 'vllm'}")
+        print(f"  Enforce Eager:       {args.enforce_eager}")
+        print(f"  Output Directory:    {out_dir}")
+        print("=" * 80 + "\n")
+
+        step17_backend_type = args.backend or "vllm"
+        step17_target_slo = TargetSLO(p95_latency_ms=target_p95)
+        runner_step17 = Step17BenchmarkRunner(
+            model_id=model_id,
+            context_profiles=ctx_profs,
+            traffic_profiles=traf_profs,
+            load_levels=loads,
+            target_slo=step17_target_slo,
+            enforce_eager=args.enforce_eager,
+        )
+
+        step17_mock_backend: Any = None
+        if step17_backend_type == "mock":
+            step17_mock_backend = MockBackend(default_latency_sec=0.005)
+
+        report_step17 = await runner_step17.run_experiment(
+            backend=step17_mock_backend,
+            repetitions=repetitions,
+            warmup_count=warmup,
+            seed=args.seed,
+        )
+
+        print()
+        print(format_step17_report(report_step17))
+        if out_dir:
+            summary_path, raw_path, context_path, traffic_path, readme_path = (
+                runner_step17.save_reports(report_step17, Path(out_dir))
+            )
+            print(f"\nSaved structured Step 17 reports to: {out_dir}")
+            print(f"  - Summary:          {summary_path}")
+            print(f"  - Raw Data:         {raw_path}")
+            print(f"  - Context Analysis: {context_path}")
+            print(f"  - Traffic Analysis: {traffic_path}")
+            print(f"  - README:           {readme_path}")
+
+        all_passed = all(
+            cond.all_repetitions_valid
+            for cell_res in report_step17.results_by_cell.values()
+            for cond in cell_res.conditions.values()
+        )
+        return 0 if all_passed else 1
+
     # Step 16: Heavy-Load Scalability & Saturation Characterization Experiment
     if args.experiment_step16:
         from inferopt.benchmarks.step16_scalability import (
