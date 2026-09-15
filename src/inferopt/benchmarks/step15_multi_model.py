@@ -201,6 +201,14 @@ class Step15ModelExecutionResult(BaseModel):
     engine_teardown_count: int = Field(
         default=1, description="Engine teardowns during this model run"
     )
+    backend_name: str = Field(
+        default="vllm", description="Inference backend name used for execution"
+    )
+    backend_confirmed: bool = Field(
+        default=False, description="True if verified real hardware engine execution"
+    )
+    backend_generate_calls: int = Field(default=0, description="Total single generate calls")
+    backend_generate_batch_calls: int = Field(default=0, description="Total batched generate calls")
     execution_error: str | None = Field(
         default=None, description="Detailed error message if execution failed"
     )
@@ -290,6 +298,74 @@ class Step15CrossModelReport(BaseModel):
     )
 
 
+def verify_step15_model_execution(result: Step15ModelExecutionResult) -> bool:
+    """Verify observable runtime evidence that an individual model executed on a real engine.
+
+    Returns True if and only if:
+    1. Execution succeeded without errors (is_successful=True, execution_error=None).
+    2. Model availability status is RUNNABLE (not AUTHENTICATION_REQUIRED, OUT_OF_MEMORY, etc.).
+    3. Backend is a real hardware backend (backend_name in ("vllm", "mlx") and not "mock").
+    4. Backend explicitly confirmed real hardware execution (backend_confirmed=True).
+    5. Engine lifecycle verified with initialization and teardown (inits >= 1, teardowns >= 1).
+    6. Real inference generation occurred (generate_calls + batch_calls > 0).
+    7. All 3 conditions executed with valid accounting (scheduled == completed == measured).
+    8. Timings are positive and causal (duration > 0, mean_lat > 0, p95_lat >= queue_wait).
+    """
+    if not result.is_successful or result.execution_error is not None:
+        return False
+
+    if result.model_spec.status != ModelStatus.RUNNABLE:
+        return False
+
+    if result.backend_name == "mock" or not result.backend_confirmed:
+        return False
+
+    if result.engine_initialization_count < 1 or result.engine_teardown_count < 1:
+        return False
+
+    if (result.backend_generate_calls + result.backend_generate_batch_calls) <= 0:
+        return False
+
+    required_conditions = ("STATIC_CONSERVATIVE", "STATIC_OPTIMIZED", "SLA_AWARE_ADAPTIVE")
+    for cond_name in required_conditions:
+        cond = result.conditions.get(cond_name)
+        if cond is None:
+            return False
+        if not cond.integrity_valid:
+            return False
+        if cond.scheduled_requests <= 0 or cond.completed_requests != cond.scheduled_requests:
+            return False
+        if cond.failed_requests != 0 or cond.measured_requests != cond.completed_requests:
+            return False
+        if cond.total_duration_sec <= 0.0 or cond.mean_latency_ms <= 0.0:
+            return False
+        if cond.p95_latency_ms < cond.mean_queue_wait_ms - 1e-6:
+            return False
+
+    return True
+
+
+def verify_step15_cross_model_report(
+    results_by_model: dict[str, Step15ModelExecutionResult],
+    backend_name: str,
+) -> bool:
+    """Verify whether a Step 15 cross-model report is backed by real hardware execution.
+
+    Returns True if and only if:
+    1. Overall backend is not 'mock'.
+    2. At least one model executed successfully.
+    3. All successful models in the report pass verify_step15_model_execution.
+    """
+    if backend_name == "mock":
+        return False
+
+    successful_results = [r for r in results_by_model.values() if r.is_successful]
+    if not successful_results:
+        return False
+
+    return all(verify_step15_model_execution(r) for r in successful_results)
+
+
 def classify_step15_findings(
     comparison: Step15CrossModelComparison,
     results_by_model: dict[str, Step15ModelExecutionResult],
@@ -301,6 +377,7 @@ def classify_step15_findings(
     not_proven: list[str] = []
 
     successful_results = {m: r for m, r in results_by_model.items() if r.is_successful}
+    failed_results = {m: r for m, r in results_by_model.items() if not r.is_successful}
 
     # 1. Proven observations
     proven.append(
@@ -309,7 +386,8 @@ def classify_step15_findings(
     )
     proven.append(
         "Request Accounting Integrity: 100% request completion integrity verified across all "
-        f"evaluated models ({len(successful_results)} successful model runs, 0 dropped requests)."
+        f"evaluated runnable models ({len(successful_results)} successful model runs, "
+        "0 dropped requests)."
     )
 
     for m_id, delta in comparison.model_deltas.items():
@@ -325,7 +403,7 @@ def classify_step15_findings(
         if comparison.same_config_wins_all_models:
             suggested.append(
                 "Optimal Configuration Convergence: The same configuration won across evaluated "
-                "models on this specific workload profile."
+                "runnable models on this specific workload profile."
             )
         else:
             suggested.append(
@@ -341,6 +419,19 @@ def classify_step15_findings(
         )
 
     # 3. Not proven and limitations
+    if failed_results:
+        for f_id, f_res in failed_results.items():
+            not_proven.append(
+                f"Model Evaluation Limitation ({f_id}): Model execution failed with status "
+                f"{f_res.model_spec.status.value} ({f_res.execution_error or 'No response'}). "
+                "NO performance or SLA conclusions are claimed for this model."
+            )
+
+    not_proven.append(
+        "Architecture Family Lineage: Models utilizing shared base architecture components "
+        "(e.g., SmolLM2 utilizing LlamaForCausalLM) share architectural mechanisms; "
+        "cross-model generalization conclusions must account for underlying architectural lineage."
+    )
     not_proven.append(
         "H1 (Universal Model-Dependent Optimal Configuration): NOT PROVEN UNIVERSALLY - Tested "
         "evidence is scoped to evaluated models and workloads; generalization across arbitrary "
@@ -881,6 +972,11 @@ class Step15MultiModelRunner:
         model_id = model_spec.model_id
         logger.info("Starting Step 15 evaluation for model: %s", model_id)
 
+        backend_name = getattr(backend, "backend_name", "vllm")
+        backend_is_real = getattr(backend, "is_real_execution", False)
+        init_gen_calls = getattr(backend, "generate_calls", 0)
+        init_batch_calls = getattr(backend, "generate_batch_calls", 0)
+
         exp_workload = self.build_exploration_workload(
             num_requests=num_requests_per_phase * 2, seed=seed
         )
@@ -891,6 +987,13 @@ class Step15MultiModelRunner:
             num_requests_per_phase=num_requests_per_phase, seed=seed
         )
 
+        is_successful = False
+        execution_error: str | None = None
+        winning_config: TunableConfig | None = None
+        candidate_records: list[Step15CandidateMetricRecord] = []
+        conditions: dict[str, Step15ModelConditionSummary] = {}
+        status = ModelStatus.RUNNABLE
+
         try:
             # 1. Initialize model engine
             if hasattr(backend, "load_model"):
@@ -898,7 +1001,6 @@ class Step15MultiModelRunner:
 
             # 2. Candidate Space Exploration
             candidates = self._candidate_space.generate_candidates()
-            candidate_records: list[Step15CandidateMetricRecord] = []
 
             for cand in candidates:
                 cand_rec = await self._evaluate_candidate(
@@ -984,60 +1086,71 @@ class Step15MultiModelRunner:
                 "STATIC_OPTIMIZED": res_opt,
                 "SLA_AWARE_ADAPTIVE": res_adapt,
             }
-
-            return Step15ModelExecutionResult(
-                model_spec=model_spec,
-                workload_hash=w_hash,
-                selected_optimal_config=winning_config,
-                candidate_evaluations=tuple(candidate_records),
-                conditions=conditions,
-                engine_initialization_count=1,
-                engine_teardown_count=1,
-                is_successful=True,
-            )
+            is_successful = True
 
         except Exception as err:
             logger.error("Model %s benchmark execution failed: %s", model_id, err, exc_info=True)
+            is_successful = False
+            execution_error = str(err)
             status = ModelStatus.FAILED_TO_INITIALIZE
-            err_msg = str(err)
             if (
-                "authentication" in err_msg.lower()
-                or "gated" in err_msg.lower()
-                or "401" in err_msg
+                "authentication" in execution_error.lower()
+                or "gated" in execution_error.lower()
+                or "401" in execution_error
             ):
                 status = ModelStatus.AUTHENTICATION_REQUIRED
-            elif "out of memory" in err_msg.lower() or "cuda oom" in err_msg.lower():
+            elif (
+                "out of memory" in execution_error.lower() or "cuda oom" in execution_error.lower()
+            ):
                 status = ModelStatus.OUT_OF_MEMORY
 
-            failed_spec = ModelSpec(
-                model_id=model_spec.model_id,
-                model_family=model_spec.model_family,
-                parameter_size_label=model_spec.parameter_size_label,
-                expected_context_length=model_spec.expected_context_length,
-                backend=model_spec.backend,
-                dtype=model_spec.dtype,
-                status=status,
-                initialization_error=err_msg,
-            )
-            return Step15ModelExecutionResult(
-                model_spec=failed_spec,
-                workload_hash=w_hash,
-                selected_optimal_config=None,
-                candidate_evaluations=(),
-                conditions={},
-                engine_initialization_count=getattr(backend, "engine_initializations", 0),
-                engine_teardown_count=getattr(backend, "engine_teardowns", 0),
-                execution_error=err_msg,
-                is_successful=False,
-            )
-
         finally:
-            # Full model teardown and VRAM garbage collection before next model
             if hasattr(backend, "unload_model"):
                 try:
                     await backend.unload_model()
                 except Exception as unl_err:
                     logger.warning("Unload error for %s: %s", model_id, unl_err)
+
+        total_gen_calls = getattr(backend, "generate_calls", 0) - init_gen_calls
+        total_batch_calls = getattr(backend, "generate_batch_calls", 0) - init_batch_calls
+        inits = getattr(backend, "engine_initializations", 1 if is_successful else 0)
+        teardowns = getattr(backend, "engine_teardowns", 1 if is_successful else 0)
+
+        is_real_confirmed = (
+            is_successful
+            and backend_is_real
+            and backend_name != "mock"
+            and (total_gen_calls + total_batch_calls > 0)
+            and len(conditions) == 3
+            and all(c.integrity_valid for c in conditions.values())
+        )
+
+        final_spec = ModelSpec(
+            model_id=model_spec.model_id,
+            model_family=model_spec.model_family,
+            parameter_size_label=model_spec.parameter_size_label,
+            expected_context_length=model_spec.expected_context_length,
+            backend=model_spec.backend,
+            dtype=model_spec.dtype,
+            status=status,
+            initialization_error=execution_error,
+        )
+
+        return Step15ModelExecutionResult(
+            model_spec=final_spec,
+            workload_hash=w_hash,
+            selected_optimal_config=winning_config if is_successful else None,
+            candidate_evaluations=tuple(candidate_records),
+            conditions=conditions,
+            engine_initialization_count=inits,
+            engine_teardown_count=teardowns,
+            backend_name=backend_name,
+            backend_confirmed=is_real_confirmed,
+            backend_generate_calls=total_gen_calls,
+            backend_generate_batch_calls=total_batch_calls,
+            execution_error=execution_error,
+            is_successful=is_successful,
+        )
 
     async def run_experiment(
         self,
@@ -1049,9 +1162,6 @@ class Step15MultiModelRunner:
         backend_inst = backend
         created_local_backend = False
         backend_name = getattr(backend_inst, "backend_name", "vllm") if backend_inst else "vllm"
-        backend_confirmed = (
-            getattr(backend_inst, "is_real_execution", False) if backend_inst else False
-        )
 
         env_meta = collect_vllm_environment_metadata(
             model_id=self._models[0].model_id if self._models else DEFAULT_VLLM_MODEL_ID,
@@ -1172,6 +1282,11 @@ class Step15MultiModelRunner:
         first_hash = next(
             (r.workload_hash for r in results_by_model.values() if r.workload_hash),
             "unknown",
+        )
+
+        backend_confirmed = verify_step15_cross_model_report(
+            results_by_model=results_by_model,
+            backend_name=backend_name,
         )
 
         return Step15CrossModelReport(

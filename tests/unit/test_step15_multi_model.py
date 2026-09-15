@@ -15,11 +15,16 @@ from inferopt.benchmarks.step15_multi_model import (
     ModelStatus,
     Step15CrossModelComparison,
     Step15CrossModelReport,
+    Step15ModelConditionSummary,
+    Step15ModelExecutionResult,
     Step15MultiModelRunner,
     classify_step15_findings,
     format_step15_report,
+    verify_step15_cross_model_report,
+    verify_step15_model_execution,
 )
 from inferopt.core.models import InferenceRequest, InferenceResponse
+from inferopt.optimizer.models import TunableConfig
 from inferopt.optimizer.sla_models import TargetSLO
 
 
@@ -313,3 +318,311 @@ class TestStep15CLIIntegration:
             exit_code = await run_benchmark_cli(args)
             assert exit_code == 0
             assert (Path(tmpdir) / "summary.json").exists()
+
+
+class TestStep15EngineVerification:
+    """Targeted regression tests for Step 15 Real Hardware Engine Verification."""
+
+    @staticmethod
+    def _create_sample_condition(
+        condition_name: str,
+        integrity_valid: bool = True,
+        scheduled: int = 16,
+        completed: int = 16,
+        failed: int = 0,
+        measured: int = 16,
+        duration: float = 2.5,
+        mean_lat: float = 50.0,
+        p95_lat: float = 80.0,
+        queue_wait: float = 10.0,
+    ) -> Step15ModelConditionSummary:
+        return Step15ModelConditionSummary(
+            condition_name=condition_name,
+            condition_type=condition_name.lower(),
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            active_config_str="c=4,b=4,w=50.0ms",
+            target_slo_p95_ms=180.0,
+            scheduled_requests=scheduled,
+            total_requests=scheduled,
+            completed_requests=completed,
+            failed_requests=failed,
+            measured_requests=measured,
+            backend_generate_calls=0,
+            backend_generate_batch_calls=4,
+            total_duration_sec=duration,
+            overall_throughput_rps=scheduled / duration if duration > 0 else 0.0,
+            output_tokens_per_sec=100.0,
+            total_tokens_per_sec=200.0,
+            mean_latency_ms=mean_lat,
+            p50_latency_ms=45.0,
+            p90_latency_ms=70.0,
+            p95_latency_ms=p95_lat,
+            p99_latency_ms=90.0,
+            mean_queue_wait_ms=queue_wait,
+            mean_backend_execution_ms=mean_lat - queue_wait,
+            total_sla_violations=0,
+            overall_sla_violation_rate_pct=0.0,
+            phase_metrics=(),
+            adaptation_events=(),
+            total_adaptations=0,
+            oscillation_count=0,
+            engine_initialization_count=1,
+            engine_teardown_count=1,
+            engine_instance_id="vllm_engine_test",
+            integrity_valid=integrity_valid,
+        )
+
+    @classmethod
+    def _create_sample_conditions(
+        cls, integrity_valid: bool = True
+    ) -> dict[str, Step15ModelConditionSummary]:
+        return {
+            "STATIC_CONSERVATIVE": cls._create_sample_condition(
+                "STATIC_CONSERVATIVE", integrity_valid=integrity_valid
+            ),
+            "STATIC_OPTIMIZED": cls._create_sample_condition(
+                "STATIC_OPTIMIZED", integrity_valid=integrity_valid
+            ),
+            "SLA_AWARE_ADAPTIVE": cls._create_sample_condition(
+                "SLA_AWARE_ADAPTIVE", integrity_valid=integrity_valid
+            ),
+        }
+
+    def test_valid_real_vllm_evidence_verified_true(self) -> None:
+        """Observable runtime facts from a real vLLM execution must verify as True."""
+        result = Step15ModelExecutionResult(
+            model_spec=ModelSpec(
+                model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+                model_family="smollm2",
+                parameter_size_label="1.7B",
+                status=ModelStatus.RUNNABLE,
+            ),
+            workload_hash="abc123hash",
+            selected_optimal_config=TunableConfig(max_concurrency=4, max_batch_size=4),
+            candidate_evaluations=(),
+            conditions=self._create_sample_conditions(integrity_valid=True),
+            engine_initialization_count=1,
+            engine_teardown_count=1,
+            backend_name="vllm",
+            backend_confirmed=True,
+            backend_generate_calls=0,
+            backend_generate_batch_calls=48,
+            execution_error=None,
+            is_successful=True,
+        )
+        assert verify_step15_model_execution(result) is True
+
+    def test_mock_backend_verified_false(self) -> None:
+        """MockBackend execution must always verify as False."""
+        result = Step15ModelExecutionResult(
+            model_spec=ModelSpec(
+                model_id="mock-model",
+                model_family="custom",
+                parameter_size_label="0.5B",
+                status=ModelStatus.RUNNABLE,
+            ),
+            workload_hash="abc123hash",
+            selected_optimal_config=TunableConfig(max_concurrency=2, max_batch_size=2),
+            candidate_evaluations=(),
+            conditions=self._create_sample_conditions(integrity_valid=True),
+            engine_initialization_count=1,
+            engine_teardown_count=1,
+            backend_name="mock",
+            backend_confirmed=False,
+            backend_generate_calls=10,
+            backend_generate_batch_calls=0,
+            execution_error=None,
+            is_successful=True,
+        )
+        assert verify_step15_model_execution(result) is False
+
+    def test_vllm_initialization_failure_verified_false(self) -> None:
+        """Failed engine initialization must verify as False."""
+        result = Step15ModelExecutionResult(
+            model_spec=ModelSpec(
+                model_id="Qwen/Qwen2.5-1.5B-Instruct",
+                model_family="qwen2.5",
+                parameter_size_label="1.5B",
+                status=ModelStatus.FAILED_TO_INITIALIZE,
+                initialization_error="CUDA out of memory",
+            ),
+            workload_hash="abc123hash",
+            selected_optimal_config=None,
+            candidate_evaluations=(),
+            conditions={},
+            engine_initialization_count=0,
+            engine_teardown_count=0,
+            backend_name="vllm",
+            backend_confirmed=False,
+            backend_generate_calls=0,
+            backend_generate_batch_calls=0,
+            execution_error="CUDA out of memory",
+            is_successful=False,
+        )
+        assert verify_step15_model_execution(result) is False
+
+    def test_zero_backend_calls_verified_false(self) -> None:
+        """Zero completed backend generate calls must verify as False."""
+        result = Step15ModelExecutionResult(
+            model_spec=ModelSpec(
+                model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+                model_family="smollm2",
+                parameter_size_label="1.7B",
+                status=ModelStatus.RUNNABLE,
+            ),
+            workload_hash="abc123hash",
+            selected_optimal_config=TunableConfig(max_concurrency=4, max_batch_size=4),
+            candidate_evaluations=(),
+            conditions=self._create_sample_conditions(integrity_valid=True),
+            engine_initialization_count=1,
+            engine_teardown_count=1,
+            backend_name="vllm",
+            backend_confirmed=True,
+            backend_generate_calls=0,
+            backend_generate_batch_calls=0,
+            execution_error=None,
+            is_successful=True,
+        )
+        assert verify_step15_model_execution(result) is False
+
+    def test_incomplete_request_accounting_verified_false(self) -> None:
+        """Incomplete or dropped request accounting must verify as False."""
+        invalid_conditions = self._create_sample_conditions(integrity_valid=False)
+        invalid_conditions["STATIC_CONSERVATIVE"] = self._create_sample_condition(
+            "STATIC_CONSERVATIVE",
+            integrity_valid=False,
+            scheduled=16,
+            completed=14,
+            failed=2,
+            measured=14,
+        )
+
+        result = Step15ModelExecutionResult(
+            model_spec=ModelSpec(
+                model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+                model_family="smollm2",
+                parameter_size_label="1.7B",
+                status=ModelStatus.RUNNABLE,
+            ),
+            workload_hash="abc123hash",
+            selected_optimal_config=TunableConfig(max_concurrency=4, max_batch_size=4),
+            candidate_evaluations=(),
+            conditions=invalid_conditions,
+            engine_initialization_count=1,
+            engine_teardown_count=1,
+            backend_name="vllm",
+            backend_confirmed=True,
+            backend_generate_calls=0,
+            backend_generate_batch_calls=48,
+            execution_error=None,
+            is_successful=True,
+        )
+        assert verify_step15_model_execution(result) is False
+
+    def test_authentication_failure_verified_false(self) -> None:
+        """Gated HuggingFace model authentication failure must verify as False."""
+        result = Step15ModelExecutionResult(
+            model_spec=ModelSpec(
+                model_id="meta-llama/Llama-3.2-1B-Instruct",
+                model_family="llama3.2",
+                parameter_size_label="1B",
+                status=ModelStatus.AUTHENTICATION_REQUIRED,
+                initialization_error="401 Client Error: Repository is gated",
+            ),
+            workload_hash="abc123hash",
+            selected_optimal_config=None,
+            candidate_evaluations=(),
+            conditions={},
+            engine_initialization_count=0,
+            engine_teardown_count=0,
+            backend_name="vllm",
+            backend_confirmed=False,
+            backend_generate_calls=0,
+            backend_generate_batch_calls=0,
+            execution_error="401 Client Error: Repository is gated",
+            is_successful=False,
+        )
+        assert verify_step15_model_execution(result) is False
+
+    def test_successful_real_batch_inference_verified_true(self) -> None:
+        """Batch-only real vLLM inference satisfies verification."""
+        result = Step15ModelExecutionResult(
+            model_spec=ModelSpec(
+                model_id="Qwen/Qwen2.5-0.5B-Instruct",
+                model_family="qwen2.5",
+                parameter_size_label="0.5B",
+                status=ModelStatus.RUNNABLE,
+            ),
+            workload_hash="qwen_hash_1",
+            selected_optimal_config=TunableConfig(max_concurrency=8, max_batch_size=8),
+            candidate_evaluations=(),
+            conditions=self._create_sample_conditions(integrity_valid=True),
+            engine_initialization_count=1,
+            engine_teardown_count=1,
+            backend_name="vllm",
+            backend_confirmed=True,
+            backend_generate_calls=0,
+            backend_generate_batch_calls=64,
+            execution_error=None,
+            is_successful=True,
+        )
+        assert verify_step15_model_execution(result) is True
+
+    def test_cross_model_report_verification(self) -> None:
+        """Cross-model report verification with runnable real vLLM and gated failure."""
+        real_smollm_res = Step15ModelExecutionResult(
+            model_spec=ModelSpec(
+                model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+                model_family="smollm2",
+                parameter_size_label="1.7B",
+                status=ModelStatus.RUNNABLE,
+            ),
+            workload_hash="hash_smollm",
+            selected_optimal_config=TunableConfig(max_concurrency=4, max_batch_size=4),
+            candidate_evaluations=(),
+            conditions=self._create_sample_conditions(integrity_valid=True),
+            engine_initialization_count=1,
+            engine_teardown_count=1,
+            backend_name="vllm",
+            backend_confirmed=True,
+            backend_generate_calls=0,
+            backend_generate_batch_calls=48,
+            execution_error=None,
+            is_successful=True,
+        )
+
+        gated_llama_res = Step15ModelExecutionResult(
+            model_spec=ModelSpec(
+                model_id="meta-llama/Llama-3.2-1B-Instruct",
+                model_family="llama3.2",
+                parameter_size_label="1B",
+                status=ModelStatus.AUTHENTICATION_REQUIRED,
+                initialization_error="401 Client Error: Repository is gated",
+            ),
+            workload_hash="hash_llama",
+            selected_optimal_config=None,
+            candidate_evaluations=(),
+            conditions={},
+            engine_initialization_count=0,
+            engine_teardown_count=0,
+            backend_name="vllm",
+            backend_confirmed=False,
+            backend_generate_calls=0,
+            backend_generate_batch_calls=0,
+            execution_error="401 Client Error: Repository is gated",
+            is_successful=False,
+        )
+
+        results_mixed = {
+            "HuggingFaceTB/SmolLM2-1.7B-Instruct": real_smollm_res,
+            "meta-llama/Llama-3.2-1B-Instruct": gated_llama_res,
+        }
+        # Mixed report has real verified execution for runnable model
+        assert verify_step15_cross_model_report(results_mixed, backend_name="vllm") is True
+
+        # Mock backend report returns False
+        assert verify_step15_cross_model_report(results_mixed, backend_name="mock") is False
+
+        # All failed models report returns False
+        results_only_failed = {"meta-llama/Llama-3.2-1B-Instruct": gated_llama_res}
+        assert verify_step15_cross_model_report(results_only_failed, backend_name="vllm") is False

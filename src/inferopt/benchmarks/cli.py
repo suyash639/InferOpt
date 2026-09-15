@@ -247,12 +247,22 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
                 fam = (
                     "qwen2.5"
                     if "qwen" in lower_m
-                    else ("llama3.2" if "llama" in lower_m else "unknown")
+                    else (
+                        "smollm2"
+                        if "smollm" in lower_m
+                        else ("llama3.2" if "llama" in lower_m else "unknown")
+                    )
                 )
                 size = (
                     "0.5B"
                     if "0.5b" in lower_m
-                    else ("1.5B" if "1.5b" in lower_m else ("1B" if "1b" in lower_m else "custom"))
+                    else (
+                        "1.5B"
+                        if "1.5b" in lower_m
+                        else (
+                            "1.7B" if "1.7b" in lower_m else ("1B" if "1b" in lower_m else "custom")
+                        )
+                    )
                 )
                 custom_models.append(
                     ModelSpec(
@@ -267,12 +277,20 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
             fam = (
                 "qwen2.5"
                 if "qwen" in lower_m
-                else ("llama3.2" if "llama" in lower_m else "unknown")
+                else (
+                    "smollm2"
+                    if "smollm" in lower_m
+                    else ("llama3.2" if "llama" in lower_m else "unknown")
+                )
             )
             size = (
                 "0.5B"
                 if "0.5b" in lower_m
-                else ("1.5B" if "1.5b" in lower_m else ("1B" if "1b" in lower_m else "custom"))
+                else (
+                    "1.5B"
+                    if "1.5b" in lower_m
+                    else ("1.7B" if "1.7b" in lower_m else ("1B" if "1b" in lower_m else "custom"))
+                )
             )
             models = (
                 ModelSpec(
