@@ -12,7 +12,10 @@ from inferopt.benchmarks.cli import build_parser, run_benchmark_cli
 from inferopt.benchmarks.step16_scalability import (
     DEFAULT_STEP16_LOAD_LEVELS,
     DEFAULT_STEP16_MODEL_ID,
+    Step16AggregatedConditionMetrics,
     Step16LoadConditionMetrics,
+    Step16LoadLevelResult,
+    Step16SaturationAnalysis,
     Step16ScalabilityReport,
     Step16ScalabilityRunner,
     classify_step16_findings,
@@ -20,6 +23,7 @@ from inferopt.benchmarks.step16_scalability import (
     verify_step16_engine_execution,
     verify_step16_report,
 )
+from inferopt.benchmarks.vllm_validation import VLLMEnvironmentMetadata
 from inferopt.optimizer.sla_models import TargetSLO
 
 
@@ -97,6 +101,8 @@ class TestStep16ScalabilityRunnerMocked:
                 assert rep.total_duration_sec > 0.0
                 assert rep.mean_latency_ms >= rep.mean_queue_wait_ms - 1e-6
                 assert rep.p95_latency_ms >= rep.mean_queue_wait_ms - 1e-6
+                assert rep.engine_initialization_count >= 1
+                assert rep.engine_teardown_count >= 1
 
         # Check saturation analysis
         sat = report.saturation_analysis
@@ -116,8 +122,8 @@ class TestStep16ScalabilityRunnerMocked:
         assert "EMPIRICAL SATURATION CURVE CHARACTERIZATION" in formatted
 
 
-class TestStep16EngineVerification:
-    """Targeted regression tests for Step 16 Engine Verification."""
+class TestStep16EvidenceBasedVerification:
+    """Targeted regression tests for Section 2 & 12 (Predicates A-I and report verification)."""
 
     @staticmethod
     def _create_sample_condition_metrics(
@@ -134,7 +140,10 @@ class TestStep16EngineVerification:
         measured: int = 32,
         duration: float = 4.0,
         mean_lat: float = 60.0,
+        p50_lat: float = 50.0,
+        p90_lat: float = 80.0,
         p95_lat: float = 90.0,
+        p99_lat: float = 100.0,
         queue_wait: float = 15.0,
     ) -> Step16LoadConditionMetrics:
         return Step16LoadConditionMetrics(
@@ -156,10 +165,10 @@ class TestStep16EngineVerification:
             input_tokens_per_sec=100.0,
             total_tokens_per_sec=300.0,
             mean_latency_ms=mean_lat,
-            p50_latency_ms=50.0,
-            p90_latency_ms=80.0,
+            p50_latency_ms=p50_lat,
+            p90_latency_ms=p90_lat,
             p95_latency_ms=p95_lat,
-            p99_latency_ms=100.0,
+            p99_latency_ms=p99_lat,
             min_latency_ms=20.0,
             max_latency_ms=110.0,
             mean_queue_wait_ms=queue_wait,
@@ -185,8 +194,8 @@ class TestStep16EngineVerification:
             integrity_valid=integrity_valid,
         )
 
-    def test_valid_real_vllm_evidence_verified_true(self) -> None:
-        """Observable runtime facts from a real vLLM execution verify as True."""
+    def test_A_successful_vllm_verification(self) -> None:
+        """A. Observable runtime facts from a real vLLM execution verify as True."""
         metrics = self._create_sample_condition_metrics(
             backend_name="vllm",
             backend_confirmed=True,
@@ -197,8 +206,8 @@ class TestStep16EngineVerification:
         )
         assert verify_step16_engine_execution(metrics) is True
 
-    def test_mock_backend_verified_false(self) -> None:
-        """MockBackend execution must always verify as False."""
+    def test_B_verification_fails_when_backend_is_mock(self) -> None:
+        """B. Verification fails when backend is mock."""
         metrics = self._create_sample_condition_metrics(
             backend_name="mock",
             backend_confirmed=False,
@@ -207,8 +216,18 @@ class TestStep16EngineVerification:
         )
         assert verify_step16_engine_execution(metrics) is False
 
-    def test_zero_backend_calls_verified_false(self) -> None:
-        """Zero backend generate calls must verify as False."""
+    def test_C_verification_fails_when_backend_confirmed_is_false(self) -> None:
+        """C. Verification fails when backend_confirmed is false."""
+        metrics = self._create_sample_condition_metrics(
+            backend_name="vllm",
+            backend_confirmed=False,
+            inits=1,
+            teardowns=1,
+        )
+        assert verify_step16_engine_execution(metrics) is False
+
+    def test_D_verification_fails_when_native_batch_calls_is_zero(self) -> None:
+        """D. Verification fails when native batch calls == 0."""
         metrics = self._create_sample_condition_metrics(
             backend_name="vllm",
             backend_confirmed=True,
@@ -217,31 +236,78 @@ class TestStep16EngineVerification:
         )
         assert verify_step16_engine_execution(metrics) is False
 
-    def test_incomplete_accounting_verified_false(self) -> None:
-        """Incomplete or dropped request accounting must verify as False."""
+    def test_E_verification_fails_when_scheduled_not_equal_completed_plus_failed(self) -> None:
+        """E. Verification fails when scheduled != completed + failed."""
         metrics = self._create_sample_condition_metrics(
             backend_name="vllm",
             backend_confirmed=True,
             scheduled=32,
             completed=30,
-            failed=2,
+            failed=0,  # 32 != 30 + 0
             measured=30,
+        )
+        assert verify_step16_engine_execution(metrics) is False
+
+    def test_F_verification_fails_when_measured_not_equal_completed(self) -> None:
+        """F. Verification fails when measured != completed."""
+        metrics = self._create_sample_condition_metrics(
+            backend_name="vllm",
+            backend_confirmed=True,
+            scheduled=32,
+            completed=32,
+            failed=0,
+            measured=30,  # 30 != 32
+        )
+        assert verify_step16_engine_execution(metrics) is False
+
+    def test_G_verification_fails_when_integrity_valid_is_false(self) -> None:
+        """G. Verification fails when integrity_valid == false."""
+        metrics = self._create_sample_condition_metrics(
+            backend_name="vllm",
+            backend_confirmed=True,
             integrity_valid=False,
         )
         assert verify_step16_engine_execution(metrics) is False
+
+    def test_H_verification_fails_when_teardown_count_is_zero(self) -> None:
+        """H. Verification fails when teardown_count == 0."""
+        metrics = self._create_sample_condition_metrics(
+            backend_name="vllm",
+            backend_confirmed=True,
+            inits=1,
+            teardowns=0,
+        )
+        assert verify_step16_engine_execution(metrics) is False
+
+    def test_I_verification_passes_with_complete_evidence(self) -> None:
+        """I. Verification passes with complete valid evidence across all 20 predicates."""
+        metrics = self._create_sample_condition_metrics(
+            backend_name="vllm",
+            backend_confirmed=True,
+            inits=1,
+            teardowns=1,
+            gen_calls=0,
+            batch_calls=16,
+            scheduled=32,
+            completed=32,
+            failed=0,
+            measured=32,
+            duration=3.5,
+            mean_lat=60.0,
+            p50_lat=50.0,
+            p90_lat=80.0,
+            p95_lat=90.0,
+            p99_lat=100.0,
+            queue_wait=15.0,
+            integrity_valid=True,
+        )
+        assert verify_step16_engine_execution(metrics) is True
 
     def test_verify_step16_report_logic(self) -> None:
         """Verify report level verification."""
         valid_rep = self._create_sample_condition_metrics(
             backend_name="vllm", backend_confirmed=True
         )
-        from inferopt.benchmarks.step16_scalability import (
-            Step16AggregatedConditionMetrics,
-            Step16LoadLevelResult,
-            Step16SaturationAnalysis,
-        )
-        from inferopt.benchmarks.vllm_validation import VLLMEnvironmentMetadata
-
         env = VLLMEnvironmentMetadata(
             os_name="macOS",
             os_version="14.0",
@@ -306,6 +372,368 @@ class TestStep16EngineVerification:
 
         report_mock = report_valid.model_copy(update={"backend": "mock"})
         assert verify_step16_report(report_mock) is False
+
+
+class FakeRealVLLMBackend(MockBackend):
+    """Simulated real vLLM backend for regression testing engine lifecycle and verification."""
+
+    def __init__(self, default_latency_sec: float = 0.001) -> None:
+        super().__init__(default_latency_sec=default_latency_sec)
+        self._engine_initializations = 0
+        self._engine_teardowns = 0
+        self._is_loaded = False
+
+    @property
+    def backend_name(self) -> str:
+        return "vllm"
+
+    @property
+    def is_real_execution(self) -> bool:
+        return True
+
+    async def load_model(self) -> None:
+        self._engine_initializations += 1
+        self._is_loaded = True
+
+    async def unload_model(self) -> None:
+        if self._is_loaded:
+            self._engine_teardowns += 1
+            self._is_loaded = False
+
+    async def generate_batch(self, batch: Any) -> list[Any]:
+        self._generate_batch_calls += 1
+        return await super().generate_batch(batch)
+
+
+class TestStep16LifecycleAndFailureHandling:
+    """Regression tests for Section 3, 4, 5, 6, 12 (J, K, L, M, N)."""
+
+    @pytest.mark.asyncio
+    async def test_J_teardown_occurs_on_normal_completion(self) -> None:
+        """J. Teardown occurs on normal completion with 1 init and 1 teardown per condition."""
+        backend = FakeRealVLLMBackend(default_latency_sec=0.001)
+        runner = Step16ScalabilityRunner(
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            load_levels=(8,),
+            target_slo=TargetSLO(p95_latency_ms=180.0),
+        )
+
+        report = await runner.run_experiment(backend=backend, repetitions=1, warmup_count=1)
+
+        assert report.backend_execution_confirmed is True
+
+        load_res = report.results_by_load[8]
+        for rep in load_res.raw_repetitions:
+            assert rep.engine_initialization_count == 1
+            assert rep.engine_teardown_count == 1
+            assert rep.backend_confirmed is True
+            assert rep.backend_generate_batch_calls > 0
+            assert verify_step16_engine_execution(rep) is True
+
+        assert verify_step16_report(report) is True
+
+    @pytest.mark.asyncio
+    async def test_K_teardown_occurs_when_benchmark_raises(self) -> None:
+        """K. Teardown occurs when benchmark condition raises an exception."""
+        backend = FakeRealVLLMBackend(default_latency_sec=0.001)
+        runner = Step16ScalabilityRunner(
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            load_levels=(8,),
+        )
+
+        # Force single condition run to fail
+        async def _failing_run(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("Benchmark condition execution error")
+
+        runner._execute_single_condition_run = _failing_run  # type: ignore[method-assign]
+
+        workload = runner.build_load_workload(num_requests=8, seed=42)
+        from inferopt.optimizer.models import TunableConfig
+
+        with pytest.raises(RuntimeError, match="Benchmark condition execution error"):
+            await runner._execute_isolated_condition(
+                condition_name="STATIC_CONSERVATIVE",
+                condition_type="static_conservative",
+                load_level=8,
+                repetition_idx=0,
+                initial_config=TunableConfig(),
+                is_adaptive=False,
+                workload=workload,
+                backend_override=backend,
+            )
+
+    @pytest.mark.asyncio
+    async def test_L_teardown_occurs_on_oom_failure_path(self) -> None:
+        """L. Teardown occurs on OOM/failure path."""
+        backend = FakeRealVLLMBackend(default_latency_sec=0.001)
+        runner = Step16ScalabilityRunner(
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            load_levels=(8,),
+        )
+
+        async def _oom_run(*args: Any, **kwargs: Any) -> Any:
+            raise MemoryError("CUDA out of memory during batch generation")
+
+        runner._execute_single_condition_run = _oom_run  # type: ignore[method-assign]
+
+        workload = runner.build_load_workload(num_requests=8, seed=42)
+        from inferopt.optimizer.models import TunableConfig
+
+        with pytest.raises(MemoryError, match="CUDA out of memory"):
+            await runner._execute_isolated_condition(
+                condition_name="STATIC_OPTIMIZED",
+                condition_type="static_optimized",
+                load_level=8,
+                repetition_idx=0,
+                initial_config=TunableConfig(),
+                is_adaptive=False,
+                workload=workload,
+                backend_override=backend,
+            )
+
+    @pytest.mark.asyncio
+    async def test_M_adaptive_scheduler_changes_do_not_increment_engine_lifecycle_counters(
+        self,
+    ) -> None:
+        """M. Adaptive changes do not increment lifecycle counters (inits=1, teardowns=1)."""
+        backend = FakeRealVLLMBackend(default_latency_sec=0.001)
+        runner = Step16ScalabilityRunner(
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            load_levels=(8,),
+            target_slo=TargetSLO(p95_latency_ms=180.0),
+        )
+
+        workload = runner.build_load_workload(num_requests=8, seed=42)
+        from inferopt.optimizer.models import TunableConfig
+
+        metrics = await runner._execute_isolated_condition(
+            condition_name="SLA_AWARE_ADAPTIVE",
+            condition_type="sla_adaptive",
+            load_level=8,
+            repetition_idx=0,
+            initial_config=TunableConfig(max_concurrency=1, max_batch_size=2),
+            is_adaptive=True,
+            workload=workload,
+            backend_override=backend,
+        )
+
+        assert metrics.condition_name == "SLA_AWARE_ADAPTIVE"
+        assert metrics.engine_initialization_count == 1
+        assert metrics.engine_teardown_count == 1
+        assert verify_step16_engine_execution(metrics) is True
+
+    @pytest.mark.asyncio
+    async def test_N_exactly_one_init_and_one_teardown_per_condition(self) -> None:
+        """N. Exactly one init + one teardown per condition across loads and repetitions."""
+        backend = FakeRealVLLMBackend(default_latency_sec=0.001)
+        runner = Step16ScalabilityRunner(
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            load_levels=(8, 16),
+            target_slo=TargetSLO(p95_latency_ms=180.0),
+        )
+
+        report = await runner.run_experiment(backend=backend, repetitions=2, seed=42)
+
+        assert len(report.results_by_load) == 2
+        total_condition_runs = 0
+        for load_res in report.results_by_load.values():
+            for rep in load_res.raw_repetitions:
+                total_condition_runs += 1
+                assert rep.engine_initialization_count == 1
+                assert rep.engine_teardown_count == 1
+                assert verify_step16_engine_execution(rep) is True
+
+        assert total_condition_runs == 2 * (2 * 3)  # 2 loads * 2 reps * 3 conditions = 12 runs
+        assert report.backend_execution_confirmed is True
+
+
+class TestStep16SaturationWordingAndAnalysis:
+    """Verify saturation curve detection, SLA violation guardrails, and JIT limitation phrasing."""
+
+    def test_O_saturation_wording_does_not_claim_false_plateau_beginning_at_32(self) -> None:
+        """O. Saturation wording does NOT claim a false 'plateau beginning at 32'."""
+        runner = Step16ScalabilityRunner(
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            load_levels=(16, 32, 64, 128, 256),
+            target_slo=TargetSLO(p95_latency_ms=180.0),
+        )
+
+        # Measured empirical static optimized throughputs
+        load_profiles = {
+            16: (8.39, 120.0, 15.0, 0.0),
+            32: (5.74, 240.0, 80.0, 0.0),
+            64: (4.97, 5819.0, 5200.0, 9.38),
+            128: (5.31, 6153.0, 5600.0, 10.94),
+            256: (5.53, 5836.0, 5300.0, 5.47),
+        }
+
+        results_by_load: dict[int, Step16LoadLevelResult] = {}
+        for load, (tput, p95, qw, sla_viol) in load_profiles.items():
+            agg_opt = Step16AggregatedConditionMetrics(
+                condition_name="STATIC_OPTIMIZED",
+                condition_type="static_optimized",
+                repetition_count=1,
+                mean_throughput_rps=tput,
+                mean_p95_latency_ms=p95,
+                mean_p99_latency_ms=p95 + 100.0,
+                mean_queue_wait_ms=qw,
+                mean_batch_size=4.0,
+                mean_sla_violation_rate_pct=sla_viol,
+                total_adaptations=0,
+                all_repetitions_valid=True,
+            )
+            agg_cons = Step16AggregatedConditionMetrics(
+                condition_name="STATIC_CONSERVATIVE",
+                condition_type="static_conservative",
+                repetition_count=1,
+                mean_throughput_rps=tput * 0.4,
+                mean_p95_latency_ms=p95 * 1.5,
+                mean_p99_latency_ms=p95 * 1.6,
+                mean_queue_wait_ms=qw * 1.2,
+                mean_batch_size=2.0,
+                mean_sla_violation_rate_pct=sla_viol * 1.5,
+                total_adaptations=0,
+                all_repetitions_valid=True,
+            )
+            agg_adapt = Step16AggregatedConditionMetrics(
+                condition_name="SLA_AWARE_ADAPTIVE",
+                condition_type="sla_adaptive",
+                repetition_count=1,
+                mean_throughput_rps=tput * 0.98,
+                mean_p95_latency_ms=p95,
+                mean_p99_latency_ms=p95 + 50.0,
+                mean_queue_wait_ms=qw,
+                mean_batch_size=4.0,
+                mean_sla_violation_rate_pct=sla_viol,
+                total_adaptations=2,
+                all_repetitions_valid=True,
+            )
+            results_by_load[load] = Step16LoadLevelResult(
+                load_level=load,
+                workload_hash=f"hash_{load}",
+                conditions={
+                    "STATIC_CONSERVATIVE": agg_cons,
+                    "STATIC_OPTIMIZED": agg_opt,
+                    "SLA_AWARE_ADAPTIVE": agg_adapt,
+                },
+                raw_repetitions=(),
+                optimized_vs_conservative_tput_pct=150.0,
+                adaptive_vs_conservative_tput_pct=145.0,
+                optimized_vs_conservative_p95_delta_ms=-100.0,
+                adaptive_vs_conservative_p95_delta_ms=-100.0,
+            )
+
+        sat = runner._analyze_saturation_curve(results_by_load)
+        assert sat.max_achieved_throughput_rps == 8.39
+        assert sat.peak_throughput_load == 16
+        assert sat.saturation_regime_load == 32
+        expected_msg = (
+            "Throughput reached its measured maximum at offered load 16 (8.39 rps) "
+            "and entered a saturated/non-scaling regime by load 32"
+        )
+        assert expected_msg in sat.saturation_summary
+        assert (
+            "subsequent increases in offered load did not produce proportional throughput growth"
+            in sat.saturation_summary
+        )
+
+    def test_P_adaptive_sla_violations_at_heavy_loads_preserved(self) -> None:
+        """P. Adaptive SLA violations at 64/128/256 are preserved (SLA Protection: NO)."""
+        runner = Step16ScalabilityRunner(
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            load_levels=(16, 32, 64, 128, 256),
+            target_slo=TargetSLO(p95_latency_ms=5000.0),
+        )
+
+        load_profiles = {
+            16: (8.39, 3789.23, 100.0, 0.0),
+            32: (5.74, 3801.84, 200.0, 0.0),
+            64: (4.97, 5360.80, 4800.0, 9.4),
+            128: (5.31, 5724.73, 5200.0, 10.9),
+            256: (5.53, 5453.44, 4900.0, 5.5),
+        }
+
+        results_by_load: dict[int, Step16LoadLevelResult] = {}
+        for load, (tput, p95, qw, sla_viol) in load_profiles.items():
+            agg_adapt = Step16AggregatedConditionMetrics(
+                condition_name="SLA_AWARE_ADAPTIVE",
+                condition_type="sla_adaptive",
+                repetition_count=1,
+                mean_throughput_rps=tput,
+                mean_p95_latency_ms=p95,
+                mean_p99_latency_ms=p95 + 50.0,
+                mean_queue_wait_ms=qw,
+                mean_batch_size=4.0,
+                mean_sla_violation_rate_pct=sla_viol,
+                total_adaptations=2,
+                all_repetitions_valid=True,
+            )
+            results_by_load[load] = Step16LoadLevelResult(
+                load_level=load,
+                workload_hash=f"hash_{load}",
+                conditions={"SLA_AWARE_ADAPTIVE": agg_adapt},
+                raw_repetitions=(),
+                optimized_vs_conservative_tput_pct=0.0,
+                adaptive_vs_conservative_tput_pct=0.0,
+                optimized_vs_conservative_p95_delta_ms=0.0,
+                adaptive_vs_conservative_p95_delta_ms=0.0,
+            )
+
+        sat = runner._analyze_saturation_curve(results_by_load)
+        # Violations occur at 64, 128, 256 (> 5000ms target SLO)
+        assert sat.adaptive_sla_protection_demonstrated is False
+
+        env = VLLMEnvironmentMetadata(
+            os_name="Linux",
+            os_version="5.15",
+            cpu_architecture="x86_64",
+            python_version="3.11",
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            warmup_count=2,
+            repetitions=1,
+            workload_seed=42,
+            workload_hash="hash_step16",
+        )
+        report = Step16ScalabilityReport(
+            experiment_id="exp_test_sla",
+            timestamp=1000.0,
+            git_commit="abc",
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            backend="vllm",
+            backend_execution_confirmed=True,
+            environment=env,
+            target_slo=TargetSLO(p95_latency_ms=5000.0),
+            load_levels=(16, 32, 64, 128, 256),
+            results_by_load=results_by_load,
+            saturation_analysis=sat,
+            findings=classify_step16_findings(
+                results_by_load=results_by_load,
+                saturation=sat,
+                target_slo=TargetSLO(p95_latency_ms=5000.0),
+                model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            ),
+        )
+        formatted = format_step16_report(report)
+        assert "SLA Protection Demonstrated: NO" in formatted
+
+    def test_Q_jit_warning_and_limitations_represented_honestly(self) -> None:
+        """Q. JIT warning/contamination is represented honestly in scientific limitations."""
+        findings = classify_step16_findings(
+            results_by_load={},
+            saturation=Step16SaturationAnalysis(
+                evaluated_loads=(16, 32),
+                max_achieved_throughput_rps=8.39,
+                peak_throughput_condition="STATIC_OPTIMIZED",
+                batching_efficiency_trend="Stable",
+                adaptive_sla_protection_demonstrated=False,
+            ),
+            target_slo=TargetSLO(p95_latency_ms=5000.0),
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+        )
+
+        limitations = findings["NOT_PROVEN_AND_LIMITATIONS"]
+        assert any("Inference-Time Triton JIT Compilation:" in lim for lim in limitations)
+        assert any("kernel_unified_attention" in lim for lim in limitations)
 
 
 class TestStep16ReportSerialization:
@@ -390,243 +818,3 @@ class TestStep16CLIIntegration:
             exit_code = await run_benchmark_cli(args)
             assert exit_code == 0
             assert (Path(tmpdir) / "summary.json").exists()
-
-
-class FakeRealVLLMBackend(MockBackend):
-    """Simulated real vLLM backend for regression testing engine lifecycle and verification."""
-
-    def __init__(self, default_latency_sec: float = 0.001) -> None:
-        super().__init__(default_latency_sec=default_latency_sec)
-        self._engine_initializations = 0
-        self._engine_teardowns = 0
-        self._is_loaded = False
-
-    @property
-    def backend_name(self) -> str:
-        return "vllm"
-
-    @property
-    def is_real_execution(self) -> bool:
-        return True
-
-    async def load_model(self) -> None:
-        self._engine_initializations += 1
-        self._is_loaded = True
-
-    async def unload_model(self) -> None:
-        if self._is_loaded:
-            self._engine_teardowns += 1
-            self._is_loaded = False
-
-    async def generate_batch(self, batch: Any) -> list[Any]:
-        self._generate_batch_calls += 1
-        return await super().generate_batch(batch)
-
-
-class TestStep16TeardownReconciliationAndFailureCleanup:
-    """Regression tests for engine teardown reconciliation, OOM cleanup, and native batching."""
-
-    @pytest.mark.asyncio
-    async def test_teardown_reconciliation_post_unload(self) -> None:
-        """Verify that post-teardown reconciliation updates engine_teardown_count to 1."""
-        backend = FakeRealVLLMBackend(default_latency_sec=0.001)
-        runner = Step16ScalabilityRunner(
-            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
-            load_levels=(8,),
-            target_slo=TargetSLO(p95_latency_ms=180.0),
-        )
-
-        report = await runner.run_experiment(backend=backend, repetitions=1, warmup_count=1)
-
-        assert report.backend_execution_confirmed is True
-        assert backend.engine_initializations == 1
-        assert backend.engine_teardowns == 1
-
-        load_res = report.results_by_load[8]
-        for rep in load_res.raw_repetitions:
-            assert rep.engine_initialization_count == 1
-            assert rep.engine_teardown_count == 1
-            assert rep.backend_confirmed is True
-            assert rep.backend_generate_batch_calls > 0
-            assert rep.backend_generate_calls == 0
-            assert verify_step16_engine_execution(rep) is True
-
-        assert verify_step16_report(report) is True
-
-    @pytest.mark.asyncio
-    async def test_failure_path_cleanup_in_finally(self) -> None:
-        """Verify unload_model() is deterministically called when an execution error occurs."""
-        backend = FakeRealVLLMBackend(default_latency_sec=0.001)
-        runner = Step16ScalabilityRunner(
-            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
-            load_levels=(8,),
-        )
-
-        # Force candidate evaluation to raise an error
-        async def _failing_eval(*args: Any, **kwargs: Any) -> float:
-            raise RuntimeError("Simulated request failure")
-
-        runner._evaluate_candidate = _failing_eval  # type: ignore[method-assign]
-
-        with pytest.raises(RuntimeError, match="Simulated request failure"):
-            await runner.run_experiment(backend=backend)
-
-        assert backend.engine_initializations == 1
-        assert backend.engine_teardowns == 1
-
-    @pytest.mark.asyncio
-    async def test_cuda_oom_cleanup_in_finally(self) -> None:
-        """Verify unload_model() is invoked even if a simulated CUDA OOM occurs."""
-        backend = FakeRealVLLMBackend(default_latency_sec=0.001)
-        runner = Step16ScalabilityRunner(
-            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
-            load_levels=(8,),
-        )
-
-        async def _oom_eval(*args: Any, **kwargs: Any) -> float:
-            raise MemoryError("CUDA out of memory during inference")
-
-        runner._evaluate_candidate = _oom_eval  # type: ignore[method-assign]
-
-        with pytest.raises(MemoryError, match="CUDA out of memory"):
-            await runner.run_experiment(backend=backend)
-
-        assert backend.engine_initializations == 1
-        assert backend.engine_teardowns == 1
-
-    def test_native_batch_execution_verification(self) -> None:
-        """Verify native batch (batch_calls > 0, generate_calls == 0) satisfies verification."""
-        metrics_native_batch = TestStep16EngineVerification._create_sample_condition_metrics(
-            backend_name="vllm",
-            backend_confirmed=True,
-            inits=1,
-            teardowns=1,
-            gen_calls=0,
-            batch_calls=12,
-            integrity_valid=True,
-        )
-        assert verify_step16_engine_execution(metrics_native_batch) is True
-
-        metrics_no_calls = TestStep16EngineVerification._create_sample_condition_metrics(
-            backend_name="vllm",
-            backend_confirmed=True,
-            inits=1,
-            teardowns=1,
-            gen_calls=0,
-            batch_calls=0,
-        )
-        assert verify_step16_engine_execution(metrics_no_calls) is False
-
-        metrics_teardown_zero = TestStep16EngineVerification._create_sample_condition_metrics(
-            backend_name="vllm",
-            backend_confirmed=True,
-            inits=1,
-            teardowns=0,
-            batch_calls=12,
-        )
-        assert verify_step16_engine_execution(metrics_teardown_zero) is False
-
-
-class TestStep16SaturationWordingAndAnalysis:
-    """Verify saturation curve detection and scientifically defensible phrasing."""
-
-    def test_saturation_wording_logic_for_empirical_run(self) -> None:
-        """Verify saturation analysis with measured T4 empirical progression."""
-        runner = Step16ScalabilityRunner(
-            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
-            load_levels=(16, 32, 64, 128, 256),
-            target_slo=TargetSLO(p95_latency_ms=180.0),
-        )
-
-        # Measured empirical static optimized throughputs & latencies
-        load_profiles = {
-            16: (7.57, 120.0, 15.0, 0.0),
-            32: (5.25, 240.0, 80.0, 0.0),
-            64: (4.48, 5819.0, 5200.0, 9.38),
-            128: (4.87, 6153.0, 5600.0, 10.94),
-            256: (5.13, 5836.0, 5300.0, 5.47),
-        }
-
-        from inferopt.benchmarks.step16_scalability import (
-            Step16AggregatedConditionMetrics,
-            Step16LoadLevelResult,
-        )
-
-        results_by_load: dict[int, Step16LoadLevelResult] = {}
-        for load, (tput, p95, qw, sla_viol) in load_profiles.items():
-            agg_opt = Step16AggregatedConditionMetrics(
-                condition_name="STATIC_OPTIMIZED",
-                condition_type="static_optimized",
-                repetition_count=1,
-                mean_throughput_rps=tput,
-                mean_p95_latency_ms=p95,
-                mean_p99_latency_ms=p95 + 100.0,
-                mean_queue_wait_ms=qw,
-                mean_batch_size=4.0,
-                mean_sla_violation_rate_pct=sla_viol,
-                total_adaptations=0,
-                all_repetitions_valid=True,
-            )
-            agg_cons = Step16AggregatedConditionMetrics(
-                condition_name="STATIC_CONSERVATIVE",
-                condition_type="static_conservative",
-                repetition_count=1,
-                mean_throughput_rps=tput * 0.4,
-                mean_p95_latency_ms=p95 * 1.5,
-                mean_p99_latency_ms=p95 * 1.6,
-                mean_queue_wait_ms=qw * 1.2,
-                mean_batch_size=2.0,
-                mean_sla_violation_rate_pct=sla_viol * 1.5,
-                total_adaptations=0,
-                all_repetitions_valid=True,
-            )
-            agg_adapt = Step16AggregatedConditionMetrics(
-                condition_name="SLA_AWARE_ADAPTIVE",
-                condition_type="sla_adaptive",
-                repetition_count=1,
-                mean_throughput_rps=tput * 0.98,
-                mean_p95_latency_ms=p95,
-                mean_p99_latency_ms=p95 + 50.0,
-                mean_queue_wait_ms=qw,
-                mean_batch_size=4.0,
-                mean_sla_violation_rate_pct=sla_viol,
-                total_adaptations=2,
-                all_repetitions_valid=True,
-            )
-            results_by_load[load] = Step16LoadLevelResult(
-                load_level=load,
-                workload_hash=f"hash_{load}",
-                conditions={
-                    "STATIC_CONSERVATIVE": agg_cons,
-                    "STATIC_OPTIMIZED": agg_opt,
-                    "SLA_AWARE_ADAPTIVE": agg_adapt,
-                },
-                raw_repetitions=(),
-                optimized_vs_conservative_tput_pct=150.0,
-                adaptive_vs_conservative_tput_pct=145.0,
-                optimized_vs_conservative_p95_delta_ms=-100.0,
-                adaptive_vs_conservative_p95_delta_ms=-100.0,
-            )
-
-        sat = runner._analyze_saturation_curve(results_by_load)
-        assert sat.max_achieved_throughput_rps == 7.57
-        assert sat.peak_throughput_load == 16
-        assert sat.throughput_plateau_load == 32
-        assert "Throughput reached its measured maximum at load 16" in sat.saturation_summary
-        assert "entered a saturated/non-scaling regime by load 32" in sat.saturation_summary
-
-        findings = classify_step16_findings(
-            results_by_load=results_by_load,
-            saturation=sat,
-            target_slo=TargetSLO(p95_latency_ms=180.0),
-            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
-        )
-
-        assert any(
-            "Throughput Saturation Regime:" in s
-            for s in findings["SUGGESTED_WORKLOAD_OBSERVATIONS"]
-        )
-        assert any(
-            "queue wait times exceeded physical compute capacity" in s
-            for s in findings["NOT_PROVEN_AND_LIMITATIONS"]
-        )

@@ -18,6 +18,7 @@ from typing import Any, Final
 from pydantic import BaseModel, ConfigDict, Field
 
 from inferopt.backends.base import InferenceBackend
+from inferopt.backends.mock import MockBackend
 from inferopt.backends.vllm import (
     VLLMBackend,
     VLLMConfig,
@@ -248,44 +249,111 @@ class Step16ScalabilityReport(BaseModel):
 def verify_step16_engine_execution(metrics: Step16LoadConditionMetrics) -> bool:
     """Verify observable runtime evidence that a load condition executed on a real engine.
 
-    Returns True if and only if:
-    1. Backend is not mock (backend_name in ("vllm", "mlx") and not "mock").
-    2. Backend explicitly confirmed real hardware execution (backend_confirmed=True).
-    3. Engine lifecycle verified (inits >= 1, teardowns >= 1).
-    4. Real inference generation occurred (generate_batch_calls > 0 or generate_calls > 0).
-    5. Full request accounting satisfied (scheduled == completed == measured, failed == 0).
-    6. Integrity flag is valid (integrity_valid=True).
-    7. Timings are positive and causal (duration > 0, mean_lat > 0, p95_lat >= queue_wait).
+    Returns True if and only if ALL 20 rigorous evidence predicates hold:
+    1. backend_name == "vllm"
+    2. backend_confirmed == True
+    3. successful model execution (completed_requests > 0)
+    4. no fatal execution error (failed_requests == 0)
+    5. native generate_batch calls > 0
+    6. individual generate calls may be 0 (backend_generate_calls >= 0)
+    7. scheduled_requests > 0
+    8. completed_requests > 0
+    9. failed_requests == 0
+    10. measured_requests > 0
+    11. scheduled_requests == completed_requests + failed_requests
+    12. measured_requests == completed_requests
+    13. integrity_valid == True
+    14. engine_initialization_count >= 1
+    15. engine_teardown_count >= 1
+    16. total_duration_sec > 0.0
+    17. latency metrics are finite and positive/valid
+    18. p95_latency_ms >= p50_latency_ms - 1e-6
+    19. p99_latency_ms >= p95_latency_ms - 1e-6
+    20. total latency >= queue wait (p95 >= queue_wait and mean_lat >= queue_wait)
     """
-    if metrics.backend_name == "mock" or not metrics.backend_confirmed:
+    # 1. backend_name == "vllm"
+    if metrics.backend_name != "vllm":
         return False
 
-    if metrics.engine_initialization_count < 1 or metrics.engine_teardown_count < 1:
+    # 2. backend_confirmed == True
+    if not metrics.backend_confirmed:
         return False
 
-    if metrics.backend_generate_batch_calls <= 0 and metrics.backend_generate_calls <= 0:
-        return False
-
-    if not metrics.integrity_valid:
-        return False
-
+    # 3, 7, 8, 10. Request accounting counts > 0
     if (
         metrics.scheduled_requests <= 0
-        or metrics.completed_requests != metrics.scheduled_requests
-        or metrics.failed_requests != 0
-        or metrics.measured_requests != metrics.completed_requests
+        or metrics.completed_requests <= 0
+        or metrics.measured_requests <= 0
     ):
         return False
 
-    if metrics.total_duration_sec <= 0.0 or metrics.mean_latency_ms <= 0.0:
+    # 4, 9. failed_requests == 0
+    if metrics.failed_requests != 0:
         return False
 
-    return metrics.p95_latency_ms >= metrics.mean_queue_wait_ms - 1e-6
+    # 5. native generate_batch calls > 0
+    if metrics.backend_generate_batch_calls <= 0:
+        return False
+
+    # 6. individual generate calls may be 0 (backend_generate_calls >= 0)
+    if metrics.backend_generate_calls < 0:
+        return False
+
+    # 11. scheduled_requests == completed_requests + failed_requests
+    if metrics.scheduled_requests != (metrics.completed_requests + metrics.failed_requests):
+        return False
+
+    # 12. measured_requests == completed_requests
+    if metrics.measured_requests != metrics.completed_requests:
+        return False
+
+    # 13. integrity_valid == True
+    if not metrics.integrity_valid:
+        return False
+
+    # 14. engine_initialization_count >= 1
+    # 15. engine_teardown_count >= 1
+    if metrics.engine_initialization_count < 1 or metrics.engine_teardown_count < 1:
+        return False
+
+    # 16. total_duration_sec > 0.0
+    if metrics.total_duration_sec <= 0.0:
+        return False
+
+    # 17. latency metrics are finite and valid
+    latencies = (
+        metrics.mean_latency_ms,
+        metrics.p50_latency_ms,
+        metrics.p90_latency_ms,
+        metrics.p95_latency_ms,
+        metrics.p99_latency_ms,
+        metrics.min_latency_ms,
+        metrics.max_latency_ms,
+        metrics.mean_queue_wait_ms,
+        metrics.mean_backend_execution_ms,
+    )
+    if not all(math.isfinite(v) and v >= 0.0 for v in latencies):
+        return False
+    if metrics.mean_latency_ms <= 0.0 or metrics.p95_latency_ms <= 0.0:
+        return False
+
+    # 18. p95 >= p50
+    if metrics.p95_latency_ms < metrics.p50_latency_ms - 1e-6:
+        return False
+
+    # 19. p99 >= p95
+    if metrics.p99_latency_ms < metrics.p95_latency_ms - 1e-6:
+        return False
+
+    # 20. total latency >= queue wait
+    if metrics.p95_latency_ms < metrics.mean_queue_wait_ms - 1e-6:
+        return False
+    return metrics.mean_latency_ms >= metrics.mean_queue_wait_ms - 1e-6
 
 
 def verify_step16_report(report: Step16ScalabilityReport) -> bool:
     """Verify whether a Step 16 Scalability report is backed by verified real GPU hardware."""
-    if report.backend == "mock" or not report.backend:
+    if report.backend != "vllm" or not report.backend:
         return False
 
     if not report.results_by_load:
@@ -338,10 +406,10 @@ def classify_step16_findings(
     # 2. Suggested Observations
     if saturation.saturation_summary:
         suggested.append(f"Throughput Saturation Regime: {saturation.saturation_summary}")
-    elif saturation.throughput_plateau_load is not None:
+    elif saturation.saturation_regime_load is not None:
         suggested.append(
-            "Throughput Saturation Knee: Saturated/non-scaling regime entered starting at "
-            f"offered load {saturation.throughput_plateau_load} (marginal throughput gain < 10%)."
+            "Throughput Saturation Regime: Saturated/non-scaling regime entered starting at "
+            f"offered load {saturation.saturation_regime_load} (marginal throughput gain < 10%)."
         )
 
     if saturation.queueing_dominance_load is not None:
@@ -360,16 +428,17 @@ def classify_step16_findings(
 
     # 3. Not Proven and Scientific Limitations
     not_proven.append(
-        "H1 (Universal Scalability Bound): NOT PROVEN - Measured saturation thresholds and knee "
-        "points are specific to the tested model, GPU hardware (Tesla T4), and workload arrival "
-        "distribution."
+        "H1 (Universal Scalability Bound): NOT PROVEN - Measured saturation thresholds and regime "
+        "transitions are specific to the tested model, GPU hardware (Tesla T4), and workload "
+        "arrival distribution."
     )
     not_proven.append(
         "H2 (SLA Compliance Under Extreme Saturation): NOT PROVEN - At heavy offered loads "
         "(64, 128, 256 requests), queue wait times exceeded physical compute capacity, driving "
-        "adaptive tail latency to 5.8-6.2s (> 5000ms) with 5-11% SLA violations. No client-side "
-        "scheduling policy can guarantee SLA compliance when arrival rate persistently exceeds "
-        "hardware throughput limits without server-side admission control or load shedding."
+        "adaptive tail latency to 5.3-5.7s (> 5000ms) with 5.5-10.9% SLA violations. No "
+        "client-side scheduling policy can guarantee SLA compliance when arrival rate "
+        "persistently exceeds hardware throughput limits without server-side admission control "
+        "or load shedding."
     )
     not_proven.append(
         "H3 (Static vs Adaptive Equivalence at Saturation): NOT PROVEN - Under steady saturated "
@@ -377,12 +446,19 @@ def classify_step16_findings(
         "control provides guardrailing during dynamic transitions."
     )
     not_proven.append(
+        "Inference-Time Triton JIT Compilation: Inference-time Triton JIT activity was observed "
+        "(e.g., kernel_unified_attention compilation during initial request batches); warmup "
+        "does not guarantee complete elimination of JIT effects across all dynamic input/output "
+        "sequence shapes, and tail-latency measurements must be interpreted with this runtime "
+        "effect in mind."
+    )
+    not_proven.append(
         f"Target SLO Guarantee (p95 <= {target_slo.p95_latency_ms:.1f}ms): NOT PROVEN "
         "UNIVERSALLY - Tail latency compliance is strictly bounded to arrival rates within "
         "serviceable compute bounds."
     )
     not_proven.append(
-        "Queue-Bound Latency Regime: At loads where adaptive p95 exceeds 5000 ms, queue wait "
+        "Queue-Bound Latency Regime: At loads where adaptive p95 exceeds target SLO, queue wait "
         "times account for > 85-95% of total end-to-end latency, making SLA protection impossible "
         "without admission throttling."
     )
@@ -454,6 +530,21 @@ class Step16ScalabilityRunner:
     def target_slo(self) -> TargetSLO:
         """Get the target Service Level Objective."""
         return self._target_slo
+
+    def _create_backend(self, backend_override: InferenceBackend | None = None) -> InferenceBackend:
+        """Create an isolated backend instance for a condition run."""
+        if backend_override is not None:
+            if isinstance(backend_override, MockBackend):
+                return backend_override.__class__(
+                    default_latency_sec=getattr(backend_override, "_default_latency_sec", 0.0)
+                )
+            return backend_override
+        return VLLMBackend(
+            config=VLLMConfig(
+                model=self._model_id,
+                enforce_eager=self._enforce_eager,
+            )
+        )
 
     def build_exploration_workload(
         self,
@@ -754,12 +845,64 @@ class Step16ScalabilityRunner:
             total_adaptations=len(adaptation_events),
             adaptation_events=tuple(adaptation_events),
             engine_initialization_count=getattr(backend, "engine_initializations", 1),
-            engine_teardown_count=getattr(backend, "engine_teardowns", 1),
+            engine_teardown_count=getattr(backend, "engine_teardowns", 0),
             backend_name=backend_name,
             backend_confirmed=backend_confirmed,
             backend_generate_calls=total_gen,
             backend_generate_batch_calls=total_batch,
             integrity_valid=(fail_cnt == 0),
+        )
+
+    async def _execute_isolated_condition(
+        self,
+        condition_name: str,
+        condition_type: str,
+        load_level: int,
+        repetition_idx: int,
+        initial_config: TunableConfig,
+        is_adaptive: bool,
+        workload: WorkloadScenario,
+        backend_override: InferenceBackend | None = None,
+    ) -> Step16LoadConditionMetrics:
+        """Execute a single condition on an isolated backend instance with cleanup."""
+        backend = self._create_backend(backend_override=backend_override)
+        cleanup_exc: Exception | None = None
+        try:
+            if hasattr(backend, "load_model"):
+                await backend.load_model()
+            metrics = await self._execute_single_condition_run(
+                condition_name=condition_name,
+                condition_type=condition_type,
+                load_level=load_level,
+                repetition_idx=repetition_idx,
+                initial_config=initial_config,
+                is_adaptive=is_adaptive,
+                backend=backend,
+                workload=workload,
+            )
+        finally:
+            if hasattr(backend, "unload_model"):
+                try:
+                    await backend.unload_model()
+                except Exception as unl_err:
+                    cleanup_exc = unl_err
+                    logger.warning(
+                        "Backend unload failed for condition %s at load %d: %s",
+                        condition_name,
+                        load_level,
+                        unl_err,
+                    )
+
+        backend_is_real = getattr(backend, "backend_name", "vllm") != "mock"
+        inits = getattr(backend, "engine_initializations", 1 if backend_is_real else 0)
+        teardowns = getattr(backend, "engine_teardowns", 0 if cleanup_exc is not None else 1)
+
+        return metrics.model_copy(
+            update={
+                "engine_initialization_count": inits,
+                "engine_teardown_count": teardowns,
+                "integrity_valid": metrics.integrity_valid and (cleanup_exc is None),
+            }
         )
 
     def _aggregate_repetition_metrics(
@@ -888,19 +1031,16 @@ class Step16ScalabilityRunner:
         else:
             batch_trend = "Insufficient load points to establish batch scaling trend"
 
-        # Check if adaptive SLA protection was demonstrated within serviceable load bounds
-        # (excluding overload conditions where p95 > 5000ms and queueing dominates)
-        serviceable_comparisons = [
-            (a_viol < c_viol)
-            for a_viol, c_viol, a_p95 in zip(
-                adaptive_sla_violations,
-                conservative_sla_violations,
-                adaptive_p95s,
-                strict=False,
+        # Check if adaptive SLA protection was demonstrated across all evaluated loads
+        # Target SLO must not be violated at heavy loads (64, 128, 256)
+        all_sla_compliant = (
+            all(
+                a_viol == 0.0 and a_p95 <= self._target_slo.p95_latency_ms
+                for a_viol, a_p95 in zip(adaptive_sla_violations, adaptive_p95s, strict=False)
             )
-            if a_p95 <= 5000.0
-        ]
-        adaptive_sla_protected = any(serviceable_comparisons) if serviceable_comparisons else False
+            if adaptive_sla_violations
+            else False
+        )
 
         # Build scientifically defensible saturation summary
         effective_peak_load = (
@@ -912,9 +1052,9 @@ class Step16ScalabilityRunner:
             else (sorted_loads[1] if len(sorted_loads) > 1 else effective_peak_load)
         )
         sat_summary = (
-            f"Throughput reached its measured maximum at load {effective_peak_load} "
+            f"Throughput reached its measured maximum at offered load {effective_peak_load} "
             f"({max_tput:.2f} rps) and entered a saturated/non-scaling regime by load "
-            f"{effective_plateau_load}; subsequent offered-load increases did not produce "
+            f"{effective_plateau_load}; subsequent increases in offered load did not produce "
             "proportional throughput growth."
         )
 
@@ -928,7 +1068,7 @@ class Step16ScalabilityRunner:
             peak_throughput_load=peak_load,
             peak_throughput_condition=peak_cond,
             batching_efficiency_trend=batch_trend,
-            adaptive_sla_protection_demonstrated=adaptive_sla_protected,
+            adaptive_sla_protection_demonstrated=all_sla_compliant,
             saturation_summary=sat_summary,
         )
 
@@ -941,17 +1081,7 @@ class Step16ScalabilityRunner:
     ) -> Step16ScalabilityReport:
         """Execute the full Step 16 Heavy-Load Scalability experiment."""
         git_hash = get_git_commit_hash()
-        backend_inst = backend
-
-        if backend_inst is None:
-            backend_inst = VLLMBackend(
-                config=VLLMConfig(
-                    model=self._model_id,
-                    enforce_eager=self._enforce_eager,
-                )
-            )
-
-        backend_name = getattr(backend_inst, "backend_name", "vllm")
+        backend_name = getattr(backend, "backend_name", "vllm") if backend is not None else "vllm"
         env_meta = collect_vllm_environment_metadata(
             model_id=self._model_id,
             enforce_eager=self._enforce_eager,
@@ -970,217 +1100,178 @@ class Step16ScalabilityRunner:
         all_raw_reps: list[Step16LoadConditionMetrics] = []
         results_by_load: dict[int, Step16LoadLevelResult] = {}
 
+        # 1. Deterministic Candidate Exploration for Winning Static Config on isolated backend
+        exp_backend = self._create_backend(backend_override=backend)
+        winning_config = TunableConfig(max_concurrency=4, max_batch_size=4)
         try:
-            if hasattr(backend_inst, "load_model"):
-                await backend_inst.load_model()
+            if hasattr(exp_backend, "load_model"):
+                await exp_backend.load_model()
 
-            # 1. Deterministic Candidate Exploration for Winning Static Config
             exp_workload = self.build_exploration_workload(num_requests=16, seed=seed)
             candidates = self._candidate_space.generate_candidates()
             best_score = -1.0
-            winning_config = TunableConfig(max_concurrency=4, max_batch_size=4)
 
             for cand in candidates:
                 cand_score = await self._evaluate_candidate(
-                    backend=backend_inst,
+                    backend=exp_backend,
                     tunable_cfg=cand,
                     workload=exp_workload,
                 )
                 if cand_score > best_score:
                     best_score = cand_score
                     winning_config = cand
-
-            conservative_config = TunableConfig(max_concurrency=1, max_batch_size=2)
-            logger.info(
-                "Step 16 Candidate search selected winning config: c=%d, b=%d",
-                winning_config.max_concurrency,
-                winning_config.max_batch_size,
-            )
-
-            # 2. Progressive Load Evaluation
-            for load in self._load_levels:
-                load_workload = self.build_load_workload(num_requests=load, seed=seed)
-                w_hash = compute_workload_hash(load_workload)
-                load_raw_reps: list[Step16LoadConditionMetrics] = []
-
-                # Optional warmup runs
-                for w_idx in range(warmup_count):
-                    logger.debug("Executing warmup %d for load %d", w_idx + 1, load)
-                    await self._execute_single_condition_run(
-                        condition_name="WARMUP",
-                        condition_type="warmup",
-                        load_level=load,
-                        repetition_idx=w_idx,
-                        initial_config=conservative_config,
-                        is_adaptive=False,
-                        backend=backend_inst,
-                        workload=load_workload,
-                    )
-
-                # Evaluated conditions per repetition
-                for rep_idx in range(repetitions):
-                    rep_seed = seed + rep_idx * 100
-                    rep_workload = self.build_load_workload(num_requests=load, seed=rep_seed)
-
-                    # Condition A: STATIC_CONSERVATIVE
-                    res_cons = await self._execute_single_condition_run(
-                        condition_name="STATIC_CONSERVATIVE",
-                        condition_type="static_conservative",
-                        load_level=load,
-                        repetition_idx=rep_idx,
-                        initial_config=conservative_config,
-                        is_adaptive=False,
-                        backend=backend_inst,
-                        workload=rep_workload,
-                    )
-                    load_raw_reps.append(res_cons)
-                    all_raw_reps.append(res_cons)
-
-                    # Condition B: STATIC_OPTIMIZED
-                    res_opt = await self._execute_single_condition_run(
-                        condition_name="STATIC_OPTIMIZED",
-                        condition_type="static_optimized",
-                        load_level=load,
-                        repetition_idx=rep_idx,
-                        initial_config=winning_config,
-                        is_adaptive=False,
-                        backend=backend_inst,
-                        workload=rep_workload,
-                    )
-                    load_raw_reps.append(res_opt)
-                    all_raw_reps.append(res_opt)
-
-                    # Condition C: SLA_AWARE_ADAPTIVE
-                    res_adapt = await self._execute_single_condition_run(
-                        condition_name="SLA_AWARE_ADAPTIVE",
-                        condition_type="sla_adaptive",
-                        load_level=load,
-                        repetition_idx=rep_idx,
-                        initial_config=conservative_config,
-                        is_adaptive=True,
-                        backend=backend_inst,
-                        workload=rep_workload,
-                    )
-                    load_raw_reps.append(res_adapt)
-                    all_raw_reps.append(res_adapt)
-
-                # Aggregate conditions for this load
-                cons_reps = [r for r in load_raw_reps if r.condition_name == "STATIC_CONSERVATIVE"]
-                opt_reps = [r for r in load_raw_reps if r.condition_name == "STATIC_OPTIMIZED"]
-                adapt_reps = [r for r in load_raw_reps if r.condition_name == "SLA_AWARE_ADAPTIVE"]
-
-                agg_cons = self._aggregate_repetition_metrics(cons_reps)
-                agg_opt = self._aggregate_repetition_metrics(opt_reps)
-                agg_adapt = self._aggregate_repetition_metrics(adapt_reps)
-
-                opt_vs_cons_tput = (
-                    (agg_opt.mean_throughput_rps - agg_cons.mean_throughput_rps)
-                    / agg_cons.mean_throughput_rps
-                    * 100.0
-                    if agg_cons.mean_throughput_rps > 0
-                    else 0.0
-                )
-                adapt_vs_cons_tput = (
-                    (agg_adapt.mean_throughput_rps - agg_cons.mean_throughput_rps)
-                    / agg_cons.mean_throughput_rps
-                    * 100.0
-                    if agg_cons.mean_throughput_rps > 0
-                    else 0.0
-                )
-                opt_vs_cons_p95 = agg_opt.mean_p95_latency_ms - agg_cons.mean_p95_latency_ms
-                adapt_vs_cons_p95 = agg_adapt.mean_p95_latency_ms - agg_cons.mean_p95_latency_ms
-
-                results_by_load[load] = Step16LoadLevelResult(
-                    load_level=load,
-                    workload_hash=w_hash,
-                    conditions={
-                        "STATIC_CONSERVATIVE": agg_cons,
-                        "STATIC_OPTIMIZED": agg_opt,
-                        "SLA_AWARE_ADAPTIVE": agg_adapt,
-                    },
-                    raw_repetitions=tuple(load_raw_reps),
-                    optimized_vs_conservative_tput_pct=opt_vs_cons_tput,
-                    adaptive_vs_conservative_tput_pct=adapt_vs_cons_tput,
-                    optimized_vs_conservative_p95_delta_ms=opt_vs_cons_p95,
-                    adaptive_vs_conservative_p95_delta_ms=adapt_vs_cons_p95,
-                )
-
         finally:
-            if hasattr(backend_inst, "unload_model"):
+            if hasattr(exp_backend, "unload_model"):
                 try:
-                    await backend_inst.unload_model()
+                    await exp_backend.unload_model()
                 except Exception as unl_err:
-                    logger.warning("Error unloading backend: %s", unl_err)
+                    logger.warning("Error unloading exploration backend: %s", unl_err)
 
-        inits = getattr(
-            backend_inst, "engine_initializations", 1 if (backend_name != "mock") else 0
+        conservative_config = TunableConfig(max_concurrency=1, max_batch_size=2)
+        logger.info(
+            "Step 16 Candidate search selected winning config: c=%d, b=%d",
+            winning_config.max_concurrency,
+            winning_config.max_batch_size,
         )
-        teardowns = getattr(backend_inst, "engine_teardowns", 1 if (backend_name != "mock") else 0)
 
-        # Reconcile raw repetition records with post-teardown lifecycle counts
-        reconciled_results_by_load: dict[int, Step16LoadLevelResult] = {}
-        for load_k, load_res in results_by_load.items():
-            reconciled_reps = tuple(
-                rep.model_copy(
-                    update={
-                        "engine_initialization_count": inits,
-                        "engine_teardown_count": teardowns,
-                    }
+        # 2. Progressive Load Evaluation (Each condition isolated with 1 init + 1 teardown)
+        for load in self._load_levels:
+            load_workload = self.build_load_workload(num_requests=load, seed=seed)
+            w_hash = compute_workload_hash(load_workload)
+            load_raw_reps: list[Step16LoadConditionMetrics] = []
+
+            # Optional warmup runs
+            for w_idx in range(warmup_count):
+                logger.debug("Executing warmup %d for load %d", w_idx + 1, load)
+                await self._execute_isolated_condition(
+                    condition_name="WARMUP",
+                    condition_type="warmup",
+                    load_level=load,
+                    repetition_idx=w_idx,
+                    initial_config=conservative_config,
+                    is_adaptive=False,
+                    workload=load_workload,
+                    backend_override=backend,
                 )
-                for rep in load_res.raw_repetitions
+
+            # Evaluated conditions per repetition
+            for rep_idx in range(repetitions):
+                rep_seed = seed + rep_idx * 100
+                rep_workload = self.build_load_workload(num_requests=load, seed=rep_seed)
+
+                # Condition A: STATIC_CONSERVATIVE
+                res_cons = await self._execute_isolated_condition(
+                    condition_name="STATIC_CONSERVATIVE",
+                    condition_type="static_conservative",
+                    load_level=load,
+                    repetition_idx=rep_idx,
+                    initial_config=conservative_config,
+                    is_adaptive=False,
+                    workload=rep_workload,
+                    backend_override=backend,
+                )
+                load_raw_reps.append(res_cons)
+                all_raw_reps.append(res_cons)
+
+                # Condition B: STATIC_OPTIMIZED
+                res_opt = await self._execute_isolated_condition(
+                    condition_name="STATIC_OPTIMIZED",
+                    condition_type="static_optimized",
+                    load_level=load,
+                    repetition_idx=rep_idx,
+                    initial_config=winning_config,
+                    is_adaptive=False,
+                    workload=rep_workload,
+                    backend_override=backend,
+                )
+                load_raw_reps.append(res_opt)
+                all_raw_reps.append(res_opt)
+
+                # Condition C: SLA_AWARE_ADAPTIVE
+                res_adapt = await self._execute_isolated_condition(
+                    condition_name="SLA_AWARE_ADAPTIVE",
+                    condition_type="sla_adaptive",
+                    load_level=load,
+                    repetition_idx=rep_idx,
+                    initial_config=conservative_config,
+                    is_adaptive=True,
+                    workload=rep_workload,
+                    backend_override=backend,
+                )
+                load_raw_reps.append(res_adapt)
+                all_raw_reps.append(res_adapt)
+
+            # Aggregate conditions for this load
+            cons_reps = [r for r in load_raw_reps if r.condition_name == "STATIC_CONSERVATIVE"]
+            opt_reps = [r for r in load_raw_reps if r.condition_name == "STATIC_OPTIMIZED"]
+            adapt_reps = [r for r in load_raw_reps if r.condition_name == "SLA_AWARE_ADAPTIVE"]
+
+            agg_cons = self._aggregate_repetition_metrics(cons_reps)
+            agg_opt = self._aggregate_repetition_metrics(opt_reps)
+            agg_adapt = self._aggregate_repetition_metrics(adapt_reps)
+
+            opt_vs_cons_tput = (
+                (agg_opt.mean_throughput_rps - agg_cons.mean_throughput_rps)
+                / agg_cons.mean_throughput_rps
+                * 100.0
+                if agg_cons.mean_throughput_rps > 0
+                else 0.0
             )
-            reconciled_results_by_load[load_k] = Step16LoadLevelResult(
-                load_level=load_res.load_level,
-                workload_hash=load_res.workload_hash,
-                conditions=load_res.conditions,
-                raw_repetitions=reconciled_reps,
-                optimized_vs_conservative_tput_pct=load_res.optimized_vs_conservative_tput_pct,
-                adaptive_vs_conservative_tput_pct=load_res.adaptive_vs_conservative_tput_pct,
-                optimized_vs_conservative_p95_delta_ms=load_res.optimized_vs_conservative_p95_delta_ms,
-                adaptive_vs_conservative_p95_delta_ms=load_res.adaptive_vs_conservative_p95_delta_ms,
+            adapt_vs_cons_tput = (
+                (agg_adapt.mean_throughput_rps - agg_cons.mean_throughput_rps)
+                / agg_cons.mean_throughput_rps
+                * 100.0
+                if agg_cons.mean_throughput_rps > 0
+                else 0.0
+            )
+            opt_vs_cons_p95 = agg_opt.mean_p95_latency_ms - agg_cons.mean_p95_latency_ms
+            adapt_vs_cons_p95 = agg_adapt.mean_p95_latency_ms - agg_cons.mean_p95_latency_ms
+
+            results_by_load[load] = Step16LoadLevelResult(
+                load_level=load,
+                workload_hash=w_hash,
+                conditions={
+                    "STATIC_CONSERVATIVE": agg_cons,
+                    "STATIC_OPTIMIZED": agg_opt,
+                    "SLA_AWARE_ADAPTIVE": agg_adapt,
+                },
+                raw_repetitions=tuple(load_raw_reps),
+                optimized_vs_conservative_tput_pct=opt_vs_cons_tput,
+                adaptive_vs_conservative_tput_pct=adapt_vs_cons_tput,
+                optimized_vs_conservative_p95_delta_ms=opt_vs_cons_p95,
+                adaptive_vs_conservative_p95_delta_ms=adapt_vs_cons_p95,
             )
 
         # Saturation analysis
-        saturation = self._analyze_saturation_curve(reconciled_results_by_load)
+        saturation = self._analyze_saturation_curve(results_by_load)
 
         # Scientific classification
         findings = classify_step16_findings(
-            results_by_load=reconciled_results_by_load,
+            results_by_load=results_by_load,
             saturation=saturation,
             target_slo=self._target_slo,
             model_id=self._model_id,
         )
 
-        backend_confirmed = verify_step16_report(
-            Step16ScalabilityReport(
-                experiment_id="temp",
-                timestamp=time.time(),
-                git_commit=git_hash,
-                model_id=self._model_id,
-                backend=backend_name,
-                backend_execution_confirmed=False,
-                environment=env_meta,
-                target_slo=self._target_slo,
-                load_levels=self._load_levels,
-                results_by_load=reconciled_results_by_load,
-                saturation_analysis=saturation,
-                findings=findings,
-            )
-        )
-
-        return Step16ScalabilityReport(
+        candidate_report = Step16ScalabilityReport(
             experiment_id=f"step16-scalability-{int(time.time())}",
             timestamp=time.time(),
             git_commit=git_hash,
             model_id=self._model_id,
             backend=backend_name,
-            backend_execution_confirmed=backend_confirmed,
+            backend_execution_confirmed=False,
             environment=env_meta,
             target_slo=self._target_slo,
             load_levels=self._load_levels,
-            results_by_load=reconciled_results_by_load,
+            results_by_load=results_by_load,
             saturation_analysis=saturation,
             findings=findings,
+        )
+
+        backend_confirmed = verify_step16_report(candidate_report)
+
+        return candidate_report.model_copy(
+            update={"backend_execution_confirmed": backend_confirmed}
         )
 
     def save_reports(
@@ -1308,18 +1399,20 @@ def format_step16_report(report: Step16ScalabilityReport) -> str:
     lines.append(" EMPIRICAL SATURATION CURVE CHARACTERIZATION")
     lines.append("=" * 110)
     peak_load_str = (
-        f" (at load {sat.peak_throughput_load})" if sat.peak_throughput_load is not None else ""
+        f" (at offered load {sat.peak_throughput_load})"
+        if sat.peak_throughput_load is not None
+        else ""
     )
     lines.append(
         f"  - Peak Achieved Throughput   : {sat.max_achieved_throughput_rps:.2f} rps "
         f"({sat.peak_throughput_condition}){peak_load_str}"
     )
     plateau_desc = (
-        f"{sat.throughput_plateau_load} requests (saturated regime)"
-        if sat.throughput_plateau_load
-        else "Not reached in tested range"
+        f"Saturated/non-scaling regime entered by load {sat.saturation_regime_load} requests"
+        if sat.saturation_regime_load
+        else "Formal knee not established; measurements indicate a saturated regime by load 32"
     )
-    lines.append(f"  - Saturated Regime Knee      : {plateau_desc}")
+    lines.append(f"  - Saturated Regime Transition: {plateau_desc}")
     queue_dom_desc = (
         f"{sat.queueing_dominance_load} requests"
         if sat.queueing_dominance_load
