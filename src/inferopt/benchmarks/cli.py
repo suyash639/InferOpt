@@ -215,7 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--warmup",
         type=int,
         default=None,
-        help="Warmup requests before timing (default: 2 for audit/vLLM/step11, 1 otherwise).",
+        help="Warmup requests before timing (default: 2 for vLLM/step11/step16, 1 otherwise).",
     )
     parser.add_argument(
         "--repetitions",
@@ -255,7 +255,7 @@ async def run_benchmark_cli(args: argparse.Namespace) -> int:
         loads = tuple(args.loads) if args.loads is not None else DEFAULT_STEP16_LOAD_LEVELS
         target_p95 = args.target_slo_p95_ms if args.target_slo_p95_ms is not None else 180.0
         repetitions = args.repetitions if args.repetitions is not None else 1
-        warmup = args.warmup if args.warmup is not None else 0
+        warmup = args.warmup if args.warmup is not None else 2
         out_dir = args.output if args.output is not None else "benchmarks/results/step16"
 
         print("\n" + "=" * 80)

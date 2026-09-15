@@ -3,6 +3,7 @@
 import json
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -389,3 +390,243 @@ class TestStep16CLIIntegration:
             exit_code = await run_benchmark_cli(args)
             assert exit_code == 0
             assert (Path(tmpdir) / "summary.json").exists()
+
+
+class FakeRealVLLMBackend(MockBackend):
+    """Simulated real vLLM backend for regression testing engine lifecycle and verification."""
+
+    def __init__(self, default_latency_sec: float = 0.001) -> None:
+        super().__init__(default_latency_sec=default_latency_sec)
+        self._engine_initializations = 0
+        self._engine_teardowns = 0
+        self._is_loaded = False
+
+    @property
+    def backend_name(self) -> str:
+        return "vllm"
+
+    @property
+    def is_real_execution(self) -> bool:
+        return True
+
+    async def load_model(self) -> None:
+        self._engine_initializations += 1
+        self._is_loaded = True
+
+    async def unload_model(self) -> None:
+        if self._is_loaded:
+            self._engine_teardowns += 1
+            self._is_loaded = False
+
+    async def generate_batch(self, batch: Any) -> list[Any]:
+        self._generate_batch_calls += 1
+        return await super().generate_batch(batch)
+
+
+class TestStep16TeardownReconciliationAndFailureCleanup:
+    """Regression tests for engine teardown reconciliation, OOM cleanup, and native batching."""
+
+    @pytest.mark.asyncio
+    async def test_teardown_reconciliation_post_unload(self) -> None:
+        """Verify that post-teardown reconciliation updates engine_teardown_count to 1."""
+        backend = FakeRealVLLMBackend(default_latency_sec=0.001)
+        runner = Step16ScalabilityRunner(
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            load_levels=(8,),
+            target_slo=TargetSLO(p95_latency_ms=180.0),
+        )
+
+        report = await runner.run_experiment(backend=backend, repetitions=1, warmup_count=1)
+
+        assert report.backend_execution_confirmed is True
+        assert backend.engine_initializations == 1
+        assert backend.engine_teardowns == 1
+
+        load_res = report.results_by_load[8]
+        for rep in load_res.raw_repetitions:
+            assert rep.engine_initialization_count == 1
+            assert rep.engine_teardown_count == 1
+            assert rep.backend_confirmed is True
+            assert rep.backend_generate_batch_calls > 0
+            assert rep.backend_generate_calls == 0
+            assert verify_step16_engine_execution(rep) is True
+
+        assert verify_step16_report(report) is True
+
+    @pytest.mark.asyncio
+    async def test_failure_path_cleanup_in_finally(self) -> None:
+        """Verify unload_model() is deterministically called when an execution error occurs."""
+        backend = FakeRealVLLMBackend(default_latency_sec=0.001)
+        runner = Step16ScalabilityRunner(
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            load_levels=(8,),
+        )
+
+        # Force candidate evaluation to raise an error
+        async def _failing_eval(*args: Any, **kwargs: Any) -> float:
+            raise RuntimeError("Simulated request failure")
+
+        runner._evaluate_candidate = _failing_eval  # type: ignore[method-assign]
+
+        with pytest.raises(RuntimeError, match="Simulated request failure"):
+            await runner.run_experiment(backend=backend)
+
+        assert backend.engine_initializations == 1
+        assert backend.engine_teardowns == 1
+
+    @pytest.mark.asyncio
+    async def test_cuda_oom_cleanup_in_finally(self) -> None:
+        """Verify unload_model() is invoked even if a simulated CUDA OOM occurs."""
+        backend = FakeRealVLLMBackend(default_latency_sec=0.001)
+        runner = Step16ScalabilityRunner(
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            load_levels=(8,),
+        )
+
+        async def _oom_eval(*args: Any, **kwargs: Any) -> float:
+            raise MemoryError("CUDA out of memory during inference")
+
+        runner._evaluate_candidate = _oom_eval  # type: ignore[method-assign]
+
+        with pytest.raises(MemoryError, match="CUDA out of memory"):
+            await runner.run_experiment(backend=backend)
+
+        assert backend.engine_initializations == 1
+        assert backend.engine_teardowns == 1
+
+    def test_native_batch_execution_verification(self) -> None:
+        """Verify native batch (batch_calls > 0, generate_calls == 0) satisfies verification."""
+        metrics_native_batch = TestStep16EngineVerification._create_sample_condition_metrics(
+            backend_name="vllm",
+            backend_confirmed=True,
+            inits=1,
+            teardowns=1,
+            gen_calls=0,
+            batch_calls=12,
+            integrity_valid=True,
+        )
+        assert verify_step16_engine_execution(metrics_native_batch) is True
+
+        metrics_no_calls = TestStep16EngineVerification._create_sample_condition_metrics(
+            backend_name="vllm",
+            backend_confirmed=True,
+            inits=1,
+            teardowns=1,
+            gen_calls=0,
+            batch_calls=0,
+        )
+        assert verify_step16_engine_execution(metrics_no_calls) is False
+
+        metrics_teardown_zero = TestStep16EngineVerification._create_sample_condition_metrics(
+            backend_name="vllm",
+            backend_confirmed=True,
+            inits=1,
+            teardowns=0,
+            batch_calls=12,
+        )
+        assert verify_step16_engine_execution(metrics_teardown_zero) is False
+
+
+class TestStep16SaturationWordingAndAnalysis:
+    """Verify saturation curve detection and scientifically defensible phrasing."""
+
+    def test_saturation_wording_logic_for_empirical_run(self) -> None:
+        """Verify saturation analysis with measured T4 empirical progression."""
+        runner = Step16ScalabilityRunner(
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+            load_levels=(16, 32, 64, 128, 256),
+            target_slo=TargetSLO(p95_latency_ms=180.0),
+        )
+
+        # Measured empirical static optimized throughputs & latencies
+        load_profiles = {
+            16: (7.57, 120.0, 15.0, 0.0),
+            32: (5.25, 240.0, 80.0, 0.0),
+            64: (4.48, 5819.0, 5200.0, 9.38),
+            128: (4.87, 6153.0, 5600.0, 10.94),
+            256: (5.13, 5836.0, 5300.0, 5.47),
+        }
+
+        from inferopt.benchmarks.step16_scalability import (
+            Step16AggregatedConditionMetrics,
+            Step16LoadLevelResult,
+        )
+
+        results_by_load: dict[int, Step16LoadLevelResult] = {}
+        for load, (tput, p95, qw, sla_viol) in load_profiles.items():
+            agg_opt = Step16AggregatedConditionMetrics(
+                condition_name="STATIC_OPTIMIZED",
+                condition_type="static_optimized",
+                repetition_count=1,
+                mean_throughput_rps=tput,
+                mean_p95_latency_ms=p95,
+                mean_p99_latency_ms=p95 + 100.0,
+                mean_queue_wait_ms=qw,
+                mean_batch_size=4.0,
+                mean_sla_violation_rate_pct=sla_viol,
+                total_adaptations=0,
+                all_repetitions_valid=True,
+            )
+            agg_cons = Step16AggregatedConditionMetrics(
+                condition_name="STATIC_CONSERVATIVE",
+                condition_type="static_conservative",
+                repetition_count=1,
+                mean_throughput_rps=tput * 0.4,
+                mean_p95_latency_ms=p95 * 1.5,
+                mean_p99_latency_ms=p95 * 1.6,
+                mean_queue_wait_ms=qw * 1.2,
+                mean_batch_size=2.0,
+                mean_sla_violation_rate_pct=sla_viol * 1.5,
+                total_adaptations=0,
+                all_repetitions_valid=True,
+            )
+            agg_adapt = Step16AggregatedConditionMetrics(
+                condition_name="SLA_AWARE_ADAPTIVE",
+                condition_type="sla_adaptive",
+                repetition_count=1,
+                mean_throughput_rps=tput * 0.98,
+                mean_p95_latency_ms=p95,
+                mean_p99_latency_ms=p95 + 50.0,
+                mean_queue_wait_ms=qw,
+                mean_batch_size=4.0,
+                mean_sla_violation_rate_pct=sla_viol,
+                total_adaptations=2,
+                all_repetitions_valid=True,
+            )
+            results_by_load[load] = Step16LoadLevelResult(
+                load_level=load,
+                workload_hash=f"hash_{load}",
+                conditions={
+                    "STATIC_CONSERVATIVE": agg_cons,
+                    "STATIC_OPTIMIZED": agg_opt,
+                    "SLA_AWARE_ADAPTIVE": agg_adapt,
+                },
+                raw_repetitions=(),
+                optimized_vs_conservative_tput_pct=150.0,
+                adaptive_vs_conservative_tput_pct=145.0,
+                optimized_vs_conservative_p95_delta_ms=-100.0,
+                adaptive_vs_conservative_p95_delta_ms=-100.0,
+            )
+
+        sat = runner._analyze_saturation_curve(results_by_load)
+        assert sat.max_achieved_throughput_rps == 7.57
+        assert sat.peak_throughput_load == 16
+        assert sat.throughput_plateau_load == 32
+        assert "Throughput reached its measured maximum at load 16" in sat.saturation_summary
+        assert "entered a saturated/non-scaling regime by load 32" in sat.saturation_summary
+
+        findings = classify_step16_findings(
+            results_by_load=results_by_load,
+            saturation=sat,
+            target_slo=TargetSLO(p95_latency_ms=180.0),
+            model_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+        )
+
+        assert any(
+            "Throughput Saturation Regime:" in s
+            for s in findings["SUGGESTED_WORKLOAD_OBSERVATIONS"]
+        )
+        assert any(
+            "queue wait times exceeded physical compute capacity" in s
+            for s in findings["NOT_PROVEN_AND_LIMITATIONS"]
+        )
