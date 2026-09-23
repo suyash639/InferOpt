@@ -1,683 +1,710 @@
 # InferOpt
 
-InferOpt is a production-oriented LLM Inference Optimization and Serving Control System designed to sit above raw inference engines to make intelligent, system-level decisions across request scheduling, dynamic batching, concurrency control, model routing, and telemetry-driven workload optimization.
+<div align="center">
 
-## Problem
+**Adaptive Control Plane & Scientific Validation Framework for Large Language Model Serving**
 
-Serving large language model (LLM) inference workloads efficiently in production is fraught with structural challenges:
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Test Suite](https://img.shields.io/badge/tests-369%20passed%20(100%25)-success.svg)](https://github.com/suyash639/InferOpt)
+[![Type Checking](https://img.shields.io/badge/mypy-strict%20compliant-brightgreen.svg)](https://mypy-lang.org/)
+[![Code Style](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![Hardware Validation](https://img.shields.io/badge/hardware-Apple%20Silicon%20Metal%20%7C%20NVIDIA%20CUDA-orange.svg)](https://github.com/suyash639/InferOpt)
 
-- **Non-deterministic generation times**: Request execution latency varies dramatically based on input prompt lengths and output generation limits.
-- **KV cache memory contention**: Key-Value (KV) cache memory is finite and highly prone to fragmentation and thrashing under fluctuating concurrency.
-- **Throughput vs. Latency Trade-offs**: Maximizing token throughput often leads to degradation in Time-To-First-Token (TTFT) and Inter-Token Latency (ITL).
-- **Static routing and naive scheduling**: Standard load-balancing mechanisms lack awareness of engine-level cache state, prompt prefix overlap, queue depth, or hardware utilization.
-
-Raw inference engines provide low-level execution primitives but lack global orchestration and adaptive control mechanisms across heterogeneous fleets.
-
-## Vision
-
-InferOpt acts as an adaptive, intelligent control and optimization layer that operates above execution engines (such as vLLM, MLX, or specialized inference runtimes). By decoupling high-level serving policy from low-level execution, InferOpt provides:
-
-1. **Intelligent Request Scheduling & Dynamic Batching**: Policy-driven scheduling algorithms optimizing for target SLAs, token-budget constraints, and prefix caching efficiency.
-2. **Backend-Agnostic Model Routing**: Real-time traffic distribution across multiple instances and engines based on queue health, cache locality, and latency metrics.
-3. **Telemetry-Driven Workload Optimization**: Continuous feedback loops collecting fine-grained inference signals to adaptively modulate admission control and concurrency thresholds.
-4. **Clean Decoupled Architecture**: Extensible interfaces allowing uniform control over local development engines (Mock/MLX) and high-throughput production clusters (vLLM on NVIDIA GPUs).
-
-## Current Status
-
-**Stage 8.5 — Real MLX Validation & Controlled Baseline**
-
-InferOpt provides an asynchronous request scheduler (`Scheduler`), dynamic batching subsystem (`BatchConfig`, `InferenceBatch`), in-process telemetry layer (`MetricsCollector`, `MetricsSnapshot`), deterministic benchmarking framework (`WorkloadScenario`, `BenchmarkRunner`), deterministic optimization engine (`DeterministicOptimizer`, `CandidateSpace`), closed-loop adaptive controller (`AdaptiveController`, `AdaptationPolicy`), real local Apple Silicon LLM execution via `MLXBackend` (`mlx` and `mlx-lm`), and a reproducible validation framework (`MLXValidator`, `DirectMLXRunner`) comparing Direct MLX execution against InferOpt-mediated execution under identical workloads and machine conditions.
+</div>
 
 ---
 
-## Architecture
+## Table of Contents
+
+1. [The LLM Serving Problem](#the-llm-serving-problem)
+2. [InferOpt Vision & Philosophy](#inferopt-vision--philosophy)
+3. [System Architecture](#system-architecture)
+4. [Detailed Serving Flows & Diagrams](#detailed-serving-flows--diagrams)
+   - [Flow 1: End-to-End Request Ingestion & Lifecycle](#flow-1-end-to-end-request-ingestion--lifecycle)
+   - [Flow 2: Dynamic Batching & Priority Queueing](#flow-2-dynamic-batching--priority-queueing)
+   - [Flow 3: Closed-Loop SLA-Constrained Adaptive Control](#flow-3-closed-loop-sla-constrained-adaptive-control)
+   - [Flow 4: Subprocess Engine Lifecycle & Hardware Isolation](#flow-4-subprocess-engine-lifecycle--hardware-isolation)
+5. [Core Subsystems Deep Dive](#core-subsystems-deep-dive)
+   - [Asynchronous Priority Scheduler](#1-asynchronous-priority-scheduler)
+   - [Dynamic Batching Engine](#2-dynamic-batching-engine)
+   - [High-Resolution In-Process Telemetry](#3-high-resolution-in-process-telemetry)
+   - [Deterministic Optimization Engine](#4-deterministic-optimization-engine)
+   - [SLA-Constrained Adaptive Controller](#5-sla-constrained-adaptive-controller)
+   - [Pluggable Backend Abstraction](#6-pluggable-backend-abstraction)
+6. [Milestone Evolution: Step-by-Step Chronology (Steps 1 – 17)](#milestone-evolution-step-by-step-chronology-steps-1--17)
+7. [Scientific Validation & The 20-Rule Verification Gate](#scientific-validation--the-20-rule-verification-gate)
+8. [Installation & Quick Start](#installation--quick-start)
+9. [CLI Benchmark & Validation Suite](#cli-benchmark--validation-suite)
+10. [Repository Structure & Development Standards](#repository-structure--development-standards)
+
+---
+
+## The LLM Serving Problem
+
+Serving Large Language Models (LLMs) in production environments differs fundamentally from conventional microservices and stateless deep learning inference:
 
 ```text
-                       +-----------------------------------+
-                       |        Client Applications        |
-                       |    (OpenAI / Custom HTTP / gRPC)  |
-                       +-----------------+-----------------+
-                                         |
-                                         v
-                       +-----------------------------------+
-                       |         InferOpt API Layer        |
-                       |      (FastAPI Request Ingestion)  |
-                       +-----------------+-----------------+
-                                         |
-                                         v
-    +-------------------------------------------------------------------------+
-    |                         InferOpt Control Plane                          |
-    |                                                                         |
-    |  +---------------------+  +--------------------+  +------------------+  |
-    |  |  Request Scheduler  |  |   Router & Load    |  | Workload Engine  |  |
-    |  | & Dynamic Batching  |<---+ Balancer         |  | & Benchmark (S5) |  |
-    |  +----------+----------+  | +---------+----------+  +--------+---------+  |
-    |             |             |           |                      |            |
-    |             +-------------|-----------+----------------------+            |
-    |                           |           |                                   |
-    |                           |           v                                   |
-    |                           |  +-------------------------+                  |
-    |                           |  | Telemetry & Feedback    |                  |
-    |                           |  | (MetricsCollector, ITL) |                  |
-    |                           |  +------------+------------+                  |
-    |                           |               |                               |
-    |                           |               v                               |
-    |                           |  +-------------------------+                  |
-    |                           |  |  Deterministic Optimizer|                  |
-    |                           |  |  & Planner Engine (S6)  |                  |
-    |                           |  +------------+------------+                  |
-    |                           |               |                               |
-    |                           |               v                               |
-    |                           |  +-------------------------+                  |
-    |                           +--|   Adaptive Controller   |                  |
-    |         (Runtime Config      |  & Closed-Loop (S7)     |                  |
-    |          Modulation)         +-------------------------+                  |
-    +-------------------------------------|-----------------------------------+
-                                          |
-                                          v
-    +-------------------------------------------------------------------------+
-    |                     Backend Abstraction Protocol                        |
-    |                       (InferenceBackendProtocol)                        |
-    +-------------------+-----------------+--------------------+--------------+
-                        |                 |                    |
-                        v                 v                    v
-              +-----------------+ +-----------------+ +------------------+
-              |  Mock Backend   | |   MLX Backend   | |   vLLM Backend   |
-              |  (Unit/CI Test) | | (Apple Silicon) | | (NVIDIA Cluster) |
-              +-----------------+ +-----------------+ +------------------+
++-----------------------------------------------------------------------------------------+
+|                               Why LLM Serving is Hard                                   |
++-----------------------------------------------------------------------------------------+
+|  1. Asymmetric Phases   | Prefill is compute-bound (O(N^2) attention over prompt).      |
+|                         | Decode is memory-bandwidth bound (O(1) token generated).      |
+|-------------------------+---------------------------------------------------------------|
+|  2. KV Cache Pressure   | Key-Value memory grows dynamically per token per layer,        |
+|                         | leading to fragmentation, thrashing, and out-of-memory crashes.|
+|-------------------------+---------------------------------------------------------------|
+|  3. Variable Sequences  | Requests have widely divergent prompt & generation lengths.   |
+|                         | Static batching leads to severe head-of-line blocking.        |
+|-------------------------+---------------------------------------------------------------|
+|  4. Conflicting Metrics | High token throughput (TPS) directly degrades interactive     |
+|                         | Time-To-First-Token (TTFT) and Inter-Token Latency (ITL).     |
+|-------------------------+---------------------------------------------------------------|
+|  5. Saturation Knee     | Beyond hardware memory bandwidth saturation, adding batch size|
+|                         | produces zero TPS gains while tail latency explodes.          |
++-----------------------------------------------------------------------------------------+
+```
+
+Raw inference engines (such as [vLLM](https://github.com/vllm-project/vllm) or [MLX](https://github.com/ml-explore/mlx)) provide low-level kernel execution, PagedAttention, and model weights management, but they lack a **global, telemetry-driven control plane** to orchestrate multi-tenant priorities, dynamic batch wait windows, bounded queue backpressure, online configuration adaptation, and strict SLA guardrailing.
+
+---
+
+## InferOpt Vision & Philosophy
+
+InferOpt operates as a decoupled **intelligent control plane and optimization layer** positioned directly above raw execution engines:
+
+```text
+                      +-----------------------------+
+                      |     Client Applications     |
+                      +--------------+--------------+
+                                     |
+                                     v
+                      +-----------------------------+
+                      |    InferOpt Control Plane   |  <-- Policy, Queueing,
+                      |  (Scheduler, SLA, Telemetry)|      Dynamic Batching,
+                      +--------------+--------------+      Adaptation
+                                     |
+                                     v
+                      +-----------------------------+
+                      |    Raw Execution Engines    |  <-- PagedAttention,
+                      |   (vLLM, MLX, TensorRT-LLM) |      CUDA Kernels, Weights
+                      +-----------------------------+
+```
+
+### Core Tenets
+
+1. **Strict Decoupling**: High-level serving policies (admission, priority, batch formation, SLA enforcement) are completely decoupled from low-level tensor operations and GPU kernels.
+2. **Deterministic & Explainable Optimization**: No opaque "black-box" models controlling runtime behavior. All adaptation decisions are derived from deterministic Pareto evaluation, monotonic criteria, and explainable safety guardrails.
+3. **Scientific Ground Truth**: Performance claims must be backed by reproducible empirical evidence on physical hardware (Metal GPU on Apple Silicon, CUDA GPU on NVIDIA Tesla/A100/H100) using strict multi-trial isolation, deterministic workload hashing, and isolated subprocess lifecycle management.
+4. **Zero Overhead on Idle**: Lightweight, zero-dependency async scheduling ensuring sub-millisecond control-plane overhead.
+
+---
+
+## System Architecture
+
+The following diagram illustrates the complete InferOpt architecture, showing the separation between the API ingress, control plane, telemetry feedback loops, optimizer, and backend execution layers:
+
+```mermaid
+flowchart TB
+    subgraph ClientLayer["Client Layer"]
+        Client["Client / Application\n(HTTP / gRPC / SDK)"]
+    end
+
+    subgraph APILayer["API Ingress Layer"]
+        FastAPIApp["FastAPI Ingestion\n(/v1/completions, /health, /metrics)"]
+    end
+
+    subgraph ControlPlane["InferOpt Control Plane"]
+        Scheduler["Asynchronous Priority Scheduler\n(inferopt.scheduler.Scheduler)"]
+        PriorityQueue["Bounded Priority Queue\n(Priority + Monotonic FIFO)"]
+        DynamicBatcher["Dynamic Batching Subsystem\n(max_batch_size, batch_wait_ms)"]
+        WorkerPool["Bounded Async Worker Pool\n(max_concurrency)"]
+    end
+
+    subgraph TelemetrySubsystem["Telemetry & Observability"]
+        Collector["MetricsCollector\n(Nanosecond High-Resolution Timers)"]
+        Snapshots["MetricsSnapshot\n(p50, p90, p95, p99, TTFT, ITL, TPS)"]
+    end
+
+    subgraph OptimizationSubsystem["Optimization & Closed-Loop Control"]
+        Optimizer["DeterministicOptimizer\n(Pareto Search Space Explorer)"]
+        RegimeDetector["Traffic Regime Detector\n(LIGHT, BURSTY, SATURATED, MIXED)"]
+        SLAController["SLA-Constrained Adaptive Controller\n(Min-Dwell Damping & Automated Rollback)"]
+    end
+
+    subgraph BackendLayer["Backend Abstraction Layer (Protocols)"]
+        Protocol["<<InferenceBackendProtocol>>\n<<BatchInferenceBackendProtocol>>"]
+        Mock["MockBackend\n(GPU-free Simulation & CI)"]
+        MLX["MLXBackend\n(Apple Silicon Metal Unified Memory)"]
+        VLLM["VLLMBackend\n(NVIDIA CUDA / PagedAttention)"]
+    end
+
+    Client -->|InferenceRequest| FastAPIApp
+    FastAPIApp -->|submit()| Scheduler
+    Scheduler --> PriorityQueue
+    PriorityQueue --> DynamicBatcher
+    DynamicBatcher --> WorkerPool
+    WorkerPool -->|InferenceBatch| Protocol
+    Protocol --> Mock
+    Protocol --> MLX
+    Protocol --> VLLM
+
+    WorkerPool -.->|Lifecycle Timings| Collector
+    Collector --> Snapshots
+    Snapshots --> RegimeDetector
+    Snapshots --> SLAController
+    RegimeDetector --> SLAController
+    Optimizer -.->|Candidate Ladder| SLAController
+    SLAController -->|apply_config()| Scheduler
+
+    style ClientLayer fill:#f9f9fb,stroke:#6b7280,stroke-width:1px
+    style APILayer fill:#eff6ff,stroke:#3b82f6,stroke-width:1px
+    style ControlPlane fill:#f0fdf4,stroke:#22c55e,stroke-width:1px
+    style TelemetrySubsystem fill:#fefce8,stroke:#eab308,stroke-width:1px
+    style OptimizationSubsystem fill:#faf5ff,stroke:#a855f7,stroke-width:1px
+    style BackendLayer fill:#fff1f2,stroke:#f43f5e,stroke-width:1px
 ```
 
 ---
 
-## Scheduler & Dynamic Batching
+## Detailed Serving Flows & Diagrams
 
-The InferOpt Scheduler serves as the primary control-plane orchestrator responsible for queueing, admission control, and resource allocation across backend engines:
+### Flow 1: End-to-End Request Ingestion & Lifecycle
 
-```text
-Requests
-   |
-   v
-Scheduler
-   |
-   +---- Priority Queue (FIFO Tie-Breaking)
-   |
-   +---- Batch Formation (Dynamic Wait Window)
-   |
-   +---- Concurrency Control (Bounded Batch Workers)
-   |
-   +---- Telemetry Collection (Fault-Isolated Lifecycle Recording)
-   |
-   v
-InferenceBackend / BatchInferenceBackend
+This sequence diagram depicts the journey of an inference request from client submission through priority queueing, dynamic batching, hardware execution, telemetry recording, and final response resolution:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as Client App
+    participant API as FastAPI / Ingress
+    participant Sched as Scheduler Queue
+    participant Batcher as Dynamic Batcher
+    participant Worker as Worker Task
+    participant Backend as Backend Engine (vLLM/MLX)
+    participant Telem as MetricsCollector
+
+    Client->>API: POST /v1/completions (InferenceRequest)
+    API->>Sched: submit(request)
+    activate Sched
+    Sched->>Sched: Check Queue Bounding (max_queue_size)
+    alt Queue Full
+        Sched-->>API: raise QueueFullError (Backpressure)
+        API-->>Client: HTTP 429 / Queue Saturated
+    else Queue Space Available
+        Sched->>Sched: Enqueue (Priority + Monotonic Counter)
+        Sched->>Telem: Record state: QUEUED
+        Sched-->>API: asyncio.Future[InferenceResponse]
+        API-->>Client: Request Accepted (Awaiting stream/response)
+    end
+    deactivate Sched
+
+    activate Worker
+    Worker->>Batcher: Pull batch (max_batch_size, batch_wait_ms)
+    activate Batcher
+    Batcher->>Sched: Dequeue available requests
+    alt Batch is full (size == max_batch_size)
+        Batcher->>Worker: Dispatch immediately
+    else Partial batch & batch_wait_ms > 0
+        Batcher->>Batcher: Wait up to batch_wait_ms for arrivals
+        Batcher->>Worker: Dispatch assembled InferenceBatch
+    end
+    deactivate Batcher
+
+    Worker->>Telem: Record state: RUNNING + Queue Wait Time
+    Worker->>Backend: generate_batch(InferenceBatch)
+    activate Backend
+    Backend->>Backend: Tokenize + Prefill (TTFT) + Decode Loop (ITL)
+    Backend-->>Worker: List[InferenceResponse]
+    deactivate Backend
+
+    Worker->>Telem: Record state: COMPLETED + Execution Time + Tokens
+    Worker->>Sched: Resolve request Futures
+    deactivate Worker
+
+    Sched-->>API: Completed InferenceResponse
+    API-->>Client: 200 OK (generated_text, token_counts, metrics)
 ```
-
-### Scheduler Responsibilities
-1. **Request Ingestion & Admission**: Accepts domain `InferenceRequest` instances asynchronously via `submit()`.
-2. **Backpressure & Queue Bounding**: Rejects excess traffic with `QueueFullError` when queue depth reaches `max_queue_size`.
-3. **Priority Dispatch**: Prioritizes urgent workloads using `InferenceRequest.priority`.
-4. **Dynamic Batching**: Groups queued requests into `InferenceBatch` objects according to `BatchConfig`.
-5. **Bounded Concurrency**: Limits concurrent in-flight batch executions to `max_concurrency`.
-6. **Lifecycle State Tracking**: Tracks request progress through discrete states (`QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`).
-7. **Execution Telemetry**: High-resolution measurement of queue wait time, batch formation wait, and execution latency (`time.perf_counter()`).
-8. **Clean Lifecycle Management**: Graceful shutdown (`start()`, `shutdown()`, and async context manager `async with Scheduler(...)`).
-
-### Request Lifecycle States
-- `QUEUED`: Request admitted to scheduler priority queue, awaiting worker batch formation.
-- `RUNNING`: Request packaged into an `InferenceBatch` and actively executing on the inference backend.
-- `COMPLETED`: Backend generation finished successfully and response has been returned.
-- `FAILED`: Execution failed due to a backend error (worker remains healthy; exception is isolated and returned to caller).
-- `CANCELLED`: Request was cancelled by caller or during graceful shutdown before/during execution.
-
-### Dynamic Batching Policy
-- **Maximum Batch Size (`max_batch_size`)**: The upper bound of requests grouped into a single `InferenceBatch`.
-- **Batching Wait Window (`batch_wait_ms`)**: When a worker begins forming a batch, if fewer than `max_batch_size` requests are immediately available, it waits up to `batch_wait_ms` for arriving traffic.
-- **Immediate Dispatch**: If the queue contains `max_batch_size` requests (or reaches capacity during the window), the batch dispatches immediately with zero additional delay.
-- **Partial Batch Dispatch**: If the wait window expires before reaching capacity, the partial batch is dispatched immediately.
-- **Order Preservation**: Batches strictly respect the scheduler's priority and FIFO tie-breaking policies.
 
 ---
 
-## Telemetry & Metrics Foundation
+### Flow 2: Dynamic Batching & Priority Queueing
 
-> [!IMPORTANT]
-> **Step 4 telemetry is measurement infrastructure, not optimization logic.**
->
-> The telemetry subsystem exists to measure, observe, and summarize serving behavior accurately and safely. It does not alter scheduling decisions, manipulate priorities, or adjust concurrency dynamically.
+InferOpt uses an intelligent batch formation algorithm that maximizes hardware saturation while bounding queuing delay:
 
-### What InferOpt Measures
+```mermaid
+flowchart TD
+    Start([Worker Becomes Idle]) --> DequeueFirst[Dequeue Highest Priority Request from PriorityQueue]
+    DequeueFirst --> CheckEmpty{Queue Empty?}
 
-1. **Request-Level Metrics (`RequestMetrics`)**:
-   - `request_id`, `priority`, `status` (`COMPLETED`, `FAILED`, `CANCELLED`).
-   - `queue_wait_ms`: Elapsed time from queue admission until backend dispatch.
-   - `execution_ms`: Elapsed time from backend dispatch until response completion.
-   - `total_latency_ms`: Total turnaround latency from queue submission to response resolution.
-   - `input_tokens`, `output_tokens`, `max_tokens`: Token accounting.
-   - `backend_name`, `batch_id`, `error_message`: Execution context.
+    CheckEmpty -- Yes --> WaitSignal[Wait on Queue Condition Variable]
+    WaitSignal --> DequeueFirst
 
-2. **Batch-Level Metrics (`BatchMetrics`)**:
-   - `batch_id`, `size`: Number of requests bundled.
-   - `batch_formation_wait_ms`: Duration spent gathering requests in the formation window before dispatch.
-   - `execution_ms`: Backend duration executing the entire batch.
-   - `total_max_tokens`, `completed_request_count`, `failed_request_count`.
+    CheckEmpty -- No --> AddToBatch[Add request to current batch candidate]
+    AddToBatch --> CheckCap{Batch size == max_batch_size?}
 
-3. **Aggregate Metrics & Snapshots (`MetricsSnapshot`)**:
-   - `RequestStats`: Total/completed/failed/cancelled counts, averages, and percentiles (`p50`, `p95`, `p99`).
-   - `BatchStats`: Total/completed/failed batch counts, average/min/max batch sizes, formation wait, and execution time.
-   - `ThroughputStats`: `requests_per_sec`, `batches_per_sec`, `tokens_per_sec`, total input/output tokens.
-   - `QueueStats`: Real-time and peak queue depth and active backend concurrency.
+    CheckCap -- Yes --> ImmediateDispatch[Dispatch Batch Immediately\nZero extra delay]
+    CheckCap -- No --> CheckWaitWindow{batch_wait_ms > 0.0?}
+
+    CheckWaitWindow -- No --> ImmediateDispatch
+    CheckWaitWindow -- Yes --> StartTimer[Start Monotonic Wait Timer\nDuration: batch_wait_ms]
+
+    StartTimer --> WaitForMore{New Request Arrives\nbefore timeout?}
+    WaitForMore -- Yes --> DequeueNext[Dequeue next highest priority request]
+    DequeueNext --> AddToBatch
+    WaitForMore -- No / Timeout --> TimeoutDispatch[Dispatch Partial Batch Immediately]
+
+    ImmediateDispatch --> ExecuteBatch([Send to Backend Protocol])
+    TimeoutDispatch --> ExecuteBatch
+
+    style Start fill:#eff6ff,stroke:#3b82f6
+    style ExecuteBatch fill:#f0fdf4,stroke:#22c55e
+    style ImmediateDispatch fill:#dcfce7,stroke:#16a34a
+    style TimeoutDispatch fill:#fef9c3,stroke:#ca8a04
+```
 
 ---
 
-## Benchmark Harness & Workload Methodology
+### Flow 3: Closed-Loop SLA-Constrained Adaptive Control
 
-```text
-Workload Scenario (Config + Seed)
-                |
-                v
-        BenchmarkRunner
-                |
-     +----------+----------+
-     | Arrival Pattern:   |
-     | - Sequential       |
-     | - Concurrent       |
-     | - Burst (Barrier)  |
-     | - Fixed-Rate       |
-     +----------+----------+
-                |
-                v
-         Scheduler & Batching
-                |
-                v
-        Inference Backend
-                |
-                v
-       MetricsCollector
-                |
-                v
-        BenchmarkResult (JSON)
+InferOpt continuously monitors empirical performance through rolling telemetry windows and dynamically adapts scheduler parameters without restarting the process or dropping requests:
+
+```mermaid
+flowchart TD
+    subgraph Monitoring["1. Telemetry Aggregation"]
+        RawMetrics[Raw Request & Batch Metrics] --> Collector[MetricsCollector]
+        Collector --> Snapshot[MetricsSnapshot Window\np50, p95, throughput, queue_depth]
+    end
+
+    subgraph Decision["2. Adaptive Decision Engine"]
+        Snapshot --> Gate1{Data Sufficiency Gate\nmin_requests & min_batches met?}
+        Gate1 -- No --> Hold1[Emit Decision: INSUFFICIENT_DATA\nKeep current configuration]
+        Gate1 -- Yes --> Gate2{Cooldown / Dwell Gate\nmin_dwell_windows elapsed?}
+        Gate2 -- No --> Hold2[Emit Decision: COOLDOWN\nPrevent thrashing/oscillation]
+        Gate2 -- Yes --> SLACheck{SLA Violation?\nmeasured p95 > SLA threshold}
+
+        SLACheck -- Yes --> RollbackCheck{Prior Safe Config\nAvailable?}
+        RollbackCheck -- Yes --> Rollback[Emit Decision: ROLLBACK\nRevert to known safe configuration]
+        RollbackCheck -- No --> Downscale[Select More Conservative Pareto Point\ne.g., lower concurrency / smaller batch]
+
+        SLACheck -- No --> RegimeEval[Detect Traffic Regime\nLIGHT, BURSTY, SATURATED, MIXED]
+        RegimeEval --> ParetoRank[Evaluate Candidate Space via DeterministicOptimizer\nMaximize TPS subject to Latency SLA]
+        ParetoRank --> HysteresisGate{Improvement > min_improvement_pct?}
+        HysteresisGate -- No --> Hold3[Emit Decision: NO_CHANGE\nFluctuation within noise floor]
+        HysteresisGate -- Yes --> ApplyNew[Emit Decision: APPLY\nNew Config: (concurrency, batch_size, wait_ms)]
+    end
+
+    subgraph Execution["3. Live Scheduler Reconfiguration"]
+        ApplyNew --> AtomicUpdate[Scheduler.apply_config\n1. Replace config atomically\n2. Scale worker pool dynamically\n3. Preserve all queued & in-flight requests]
+        Rollback --> AtomicUpdate
+        Downscale --> AtomicUpdate
+    end
+
+    style Monitoring fill:#f8fafc,stroke:#64748b
+    style Decision fill:#faf5ff,stroke:#a855f7
+    style Execution fill:#f0fdf4,stroke:#22c55e
 ```
 
-### Purpose & Experimental Methodology
+---
 
-> [!IMPORTANT]
-> **Step 5 establishes the experimental harness; it does not prove that InferOpt improves inference performance.**
->
-> All workloads in Step 5 are controlled, synthetic evaluation scenarios designed to test scheduler coordination, queueing dynamics, and dynamic batching behavior under deterministic traffic profiles. Current measurements run against `MockBackend` validate control-plane logic without requiring a physical GPU. Real GPU acceleration claims require physical hardware execution and will be evaluated in subsequent milestones.
+### Flow 4: Subprocess Engine Lifecycle & Hardware Isolation
 
-### Controlled Workload Profiles
+To ensure 100% scientific validity and prevent CUDA/Metal memory leaks between benchmark trials, InferOpt uses an isolated subprocess execution architecture:
 
-InferOpt provides pre-configured, reproducible scenarios stored in `benchmarks/workloads/`:
+```mermaid
+flowchart TD
+    subgraph ParentRunner["Parent Process (Benchmark Orchestrator)"]
+        WorkloadGen[Generate Workload Scenario] --> HashWorkload[Compute Workload SHA-256 Hash]
+        HashWorkload --> PlanMatrix[Build Experimental Grid Matrix\ne.g. Concurrency x Batch Size]
+        PlanMatrix --> LoopConditions[For each experimental condition...]
+    end
 
-1. **`light`**: 10 requests, short factual queries, `max_tokens=32`, concurrent arrival.
-2. **`medium`**: 50 requests, mixed short/medium queries, `max_tokens=64`, fixed-rate arrival (10 RPS).
-3. **`heavy`**: 200 requests, mixed short/medium/long prompts, `max_tokens=128`, concurrent arrival.
-4. **`burst`**: 50 requests released simultaneously via an `asyncio.Event` synchronization barrier to evaluate queue backpressure and batch drain.
-5. **`mixed`**: 60 requests with heterogeneous priority levels (-1, 0, 1, 2) and multiple prompt categories.
-6. **`long_context`**: 20 requests with long context documents (500+ tokens) and `max_tokens=256`.
+    subgraph ProcessBoundary["Process Isolation Barrier (multiprocessing)"]
+        LoopConditions --> SpawnChild[Spawn Isolated Subprocess\nFork / Spawn with clean memory]
+    end
 
-### Traffic Arrival Patterns
+    subgraph ChildProcess["Isolated Subprocess (Single Experimental Trial)"]
+        SpawnChild --> InitEngine[Initialize Backend Engine\nvLLM / MLX / Mock]
+        InitEngine --> RunWarmup[Execute N Warmup Iterations\nDiscard warmup outputs & timings]
+        RunWarmup --> ReplayWorkload[Replay SHA-256 Workload Exact Sequence]
+        ReplayWorkload --> RecordTimers[Record High-Resolution Timers & Tokens]
+        RecordTimers --> TeardownEngine[Explicit Engine Teardown\nengine.teardown() + CUDA cache purge]
+        TeardownEngine --> ReturnMetrics[Serialize Metrics & Hardware Confirmation]
+    end
 
-- **Sequential**: Submits one request at a time, awaiting resolution before issuing the next.
-- **Concurrent**: Releases all requests into the scheduler queue simultaneously.
-- **Burst (Barrier)**: Arms all client submission tasks behind an `asyncio.Event` barrier and releases them in a synchronized burst.
-- **Fixed-Rate**: Schedules request dispatches at targeted rate offsets (`requests / rate_rps`) using monotonic timers.
+    subgraph Aggregation["Parent Result Reconciliation & Verification"]
+        ReturnMetrics --> IPCPipe[Transfer JSON via Pipe / Temp File]
+        IPCPipe --> VerifyGate{20-Predicate Verification Gate\n- Workload hash match\n- Exactly 1 init & teardown\n- Hardware engine verified\n- Zero dropped requests}
+        VerifyGate -- Pass --> AggregateResults[Compute Mean, Median, p95, TPS, StdDev]
+        VerifyGate -- Fail --> AbortInvalid[Mark Run Invalid & Report Diagnostic]
+    end
 
-### Reproducibility & Baseline Comparison
+    style ParentRunner fill:#eff6ff,stroke:#3b82f6
+    style ProcessBoundary fill:#fef2f2,stroke:#ef4444,stroke-dasharray: 5 5
+    style ChildProcess fill:#f0fdf4,stroke:#22c55e
+    style Aggregation fill:#faf5ff,stroke:#a855f7
+```
 
-- **Deterministic Seeds**: The workload generator (`generate_workload`) relies on an explicit seed (`seed=42`). Re-running a scenario with the same seed guarantees identical prompt contents, sequence lengths, priorities, and relative arrival offsets.
-- **Future Baseline Evaluation**: The same workload JSON definition can be replayed against baseline serving models versus InferOpt configurations under identical conditions to measure comparative performance.
-- **Distribution Metrics**: Benchmark evaluations emphasize percentile distributions ($p50$, $p95$, $p99$) and throughput rates rather than misleading single-average figures.
+---
 
-### CLI Benchmark Runner
+## Core Subsystems Deep Dive
 
-InferOpt provides a built-in CLI to execute benchmarks locally:
+### 1. Asynchronous Priority Scheduler
+
+Located in [`src/inferopt/scheduler/`](file:///Users/suyashtiwari/Documents/Inferopt/src/inferopt/scheduler/), the `Scheduler` coordinates all request traffic.
+
+- **Priority Queueing with Monotonic FIFO**:
+  Requests are stored in an internal priority heap sorted by a 2-tuple:
+  $$\text{Queue Key} = (\text{priority.value}, \text{arrival\_monotonic\_counter})$$
+  Higher numerical priority values are dequeued first. Within identical priority tiers, requests are strictly dispatched in first-in-first-out (FIFO) order using a monotonically increasing sequence counter, preventing starvation and head-of-line anomalies.
+- **Bounded Queue & Backpressure**:
+  When pending requests reach `max_queue_size`, subsequent submissions are immediately rejected with a `QueueFullError`, protecting backend runtimes from unbounded memory exhaustion.
+- **Dynamic Worker Scaling (`apply_config`)**:
+  When concurrency parameters change at runtime, the scheduler scales its worker pool dynamically:
+  - *Scale Up*: Spawns additional async worker tasks immediately.
+  - *Scale Down*: Flags excess workers to retire cleanly after finishing their active batch.
+  - *Queue Preservation*: All queued requests remain ordered and untouched.
+
+---
+
+### 2. Dynamic Batching Engine
+
+InferOpt groups queued requests into `InferenceBatch` instances based on `BatchConfig`:
+
+$$\text{Batch Parameters} = (\text{max\_batch\_size}, \text{batch\_wait\_ms})$$
+
+1. **Immediate Full-Batch Dispatch**: If the queue contains $\ge \text{max\_batch\_size}$ requests, the batch is formed and dispatched immediately with **zero delay**.
+2. **Monotonic Wait Window**: If fewer requests are available, workers start a monotonic timer up to `batch_wait_ms`. If new requests arrive and fill the batch before expiration, the batch dispatches immediately.
+3. **Partial Batch Dispatch on Timeout**: If the wait window expires before capacity is reached, the partial batch dispatches immediately without stalling callers.
+
+---
+
+### 3. High-Resolution In-Process Telemetry
+
+Located in [`src/inferopt/telemetry/`](file:///Users/suyashtiwari/Documents/Inferopt/src/inferopt/telemetry/), the telemetry layer measures every phase of the inference lifecycle using nanosecond-precision monotonic clocks (`time.perf_counter()`):
+
+```text
+Request Submission
+   │
+   ├─► Queue Wait Time (queue_wait_ms)
+   │
+Batch Dispatched
+   │
+   ├─► Time-To-First-Token (TTFT)  [Prefill Phase]
+   │
+First Token Emitted
+   │
+   ├─► Inter-Token Latency (ITL)   [Autoregressive Decode Phase]
+   │
+Final Token Emitted
+   │
+   └─► Total Turnaround Latency (total_latency_ms)
+```
+
+- **Percentile Tracking**: Computes exact $p50$, $p90$, $p95$, and $p99$ tail latency percentiles across sliding windows.
+- **Throughput Accounting**: Tracks processed requests/sec, prompt tokens/sec, output tokens/sec, and total tokens/sec.
+- **Queue Diagnostics**: Measures active in-flight concurrency, real-time queue depth, and peak queue depth.
+
+---
+
+### 4. Deterministic Optimization Engine
+
+Located in [`src/inferopt/optimizer/`](file:///Users/suyashtiwari/Documents/Inferopt/src/inferopt/optimizer/), the `DeterministicOptimizer` evaluates configurations across a Cartesian candidate space:
+
+$$\text{Candidate Space} = \mathcal{C} \times \mathcal{B} \times \mathcal{W} = \{\text{concurrency}\} \times \{\text{batch\_size}\} \times \{\text{batch\_wait\_ms}\}$$
+
+#### Objective Formulations (`ObjectiveConfig`)
+
+1. **`THROUGHPUT`**:
+   $$\text{Score} = \text{throughput\_rps}$$
+2. **`LATENCY`**:
+   $$\text{Score} = -\text{p95\_latency\_ms}$$
+3. **`BALANCED`**:
+   $$\text{Score} = w_{\text{tput}} \cdot \left(\frac{\text{throughput\_rps}}{\text{target\_throughput}}\right) - w_{\text{lat}} \cdot \left(\frac{\text{p95\_latency\_ms}}{\text{target\_p95\_latency}}\right)$$
+   where $w_{\text{tput}} + w_{\text{lat}} = 1.0$.
+
+#### Deterministic 5-Tier Tie-Breaking Comparator
+When two candidate configurations achieve identical objective scores, ties are resolved deterministically using a fixed lexicographical hierarchy:
+1. **Objective Score** ($\uparrow$ higher is better)
+2. **$p95$ Tail Latency** ($\downarrow$ lower is better)
+3. **`batch_wait_ms`** ($\downarrow$ smaller wait window is better)
+4. **`max_batch_size`** ($\downarrow$ smaller memory footprint is better)
+5. **`max_concurrency`** ($\downarrow$ lower resource footprint is better)
+
+---
+
+### 5. SLA-Constrained Adaptive Controller
+
+Located in [`src/inferopt/optimizer/sla_controller.py`](file:///Users/suyashtiwari/Documents/Inferopt/src/inferopt/optimizer/sla_controller.py), the `SLAAdaptiveController` provides safe, closed-loop runtime control:
+
+- **Pareto Candidate Ladder**: Ranks all verified feasible configurations along the Pareto efficiency frontier.
+- **Min-Dwell Hysteresis**: Requires the system to remain in a given configuration for a minimum number of evaluation windows (`min_dwell_windows`) before permitting another transition, eliminating oscillation and control thrashing.
+- **Automated Rollback**: If an applied configuration violates an SLA target ($\text{p95} > \text{SLA}$) or degrades performance by more than $\text{rollback\_degradation\_pct}$, the controller immediately reverts to the prior known-safe configuration.
+
+---
+
+### 6. Pluggable Backend Abstraction
+
+InferOpt defines clean async protocols in [`src/inferopt/backends/base.py`](file:///Users/suyashtiwari/Documents/Inferopt/src/inferopt/backends/base.py):
+
+| Backend | Target Hardware | Execution Engine | Use Case |
+| :--- | :--- | :--- | :--- |
+| **`MockBackend`** | CPU (Any OS) | Async Sleep & Synthetic Tokenizer | Unit testing, CI/CD pipelines, control-plane simulation |
+| **`MLXBackend`** | Apple Silicon (macOS) | Apple MLX (`mlx-lm`, Metal unified memory) | Local LLM testing, workstation development, Metal GPU validation |
+| **`VLLMBackend`** | Linux + NVIDIA CUDA | vLLM (`vllm.LLM`, PagedAttention, Triton) | Production cluster serving, high-throughput GPU benchmarking |
+
+---
+
+## Milestone Evolution: Step-by-Step Chronology (Steps 1 – 17)
+
+InferOpt has been developed through a disciplined, milestone-driven scientific process. Each step builds upon verified foundations:
+
+| Step | Milestone Name | Key Technical Additions | Validation Focus |
+| :---: | :--- | :--- | :--- |
+| **1** | **Core Domain Models & Protocols** | `InferenceRequest`, `InferenceResponse`, `RequestPriority`, `InferenceBackendProtocol` | Immutable domain structures, type safety |
+| **2** | **Asynchronous Scheduler** | Bounded priority queue, monotonic FIFO tie-breaker, worker lifecycle | Queue bounding, backpressure (`QueueFullError`) |
+| **3** | **Dynamic Batching Engine** | `BatchConfig`, `InferenceBatch`, wait windows, timeout dispatch | Immediate vs wait-window batch formation |
+| **4** | **In-Process Telemetry Foundation** | `MetricsCollector`, `RequestMetrics`, `MetricsSnapshot`, $p50/p90/p95/p99$ | Nanosecond timers, TTFT, ITL, token throughput |
+| **5** | **Synthetic Workload Generator** | `WorkloadScenario`, `ArrivalPattern` (Sequential, Concurrent, Burst, Rate) | Deterministic seeds, reproducible CLI harness |
+| **6** | **Deterministic Optimizer** | `DeterministicOptimizer`, `CandidateSpace`, Pareto objective scoring | Multi-criteria scoring, lexicographical tie-breaking |
+| **7** | **Closed-Loop Adaptive Controller** | `AdaptiveController`, dynamic live `apply_config()`, anti-thrashing cooldown | Bounded adaptation, automated safety rollback |
+| **8** | **Apple Silicon MLX Backend** | `MLXBackend`, Metal unified memory, native `mlx_lm.batch_generate` | Local hardware execution, exact tokenizer counts |
+| **8.5** | **Controlled Apple Silicon Baseline** | `DirectMLXRunner` vs `BenchmarkRunner` under identical workloads | Controlled differential overhead on Metal GPU |
+| **9** | **NVIDIA vLLM Backend Integration** | `VLLMBackend`, PagedAttention, native batched `LLM.generate` | High-throughput CUDA GPU serving abstraction |
+| **10** | **Scientific Real-vLLM Validation** | 5-condition GPU benchmark (Direct vs Batch 1, 2, 4, 8) | Workload SHA-256 hash replay, cold-start isolation |
+| **11** | **Workload-Aware Batch Selection** | Empirical grid search $(c, b, w)$ matched to arrival distributions | Workload-dependent optimal configuration mapping |
+| **12** | **Multi-Workload Generalization** | Evaluation across Light, Bursty, Saturated, Mixed traffic profiles | Generalization across heterogeneous traffic patterns |
+| **13** | **Dynamic Workload Transitions** | Live workload shifting (Light $\to$ Burst $\to$ Saturated) with zero restart | Seamless runtime adaptation under shifting load |
+| **14** | **SLA-Constrained Adaptive Control** | `SLAAdaptiveController`, Pareto candidate ladder, min-dwell damping | Strict p95 tail latency enforcement under load |
+| **15** | **Multi-Model Architecture Generalization** | SmolLM2-1.7B, Qwen2.5-0.5B, Llama-3.2-1B evaluation | Model-invariant scheduling & batching efficiency |
+| **16** | **Heavy-Load Scalability & Saturation** | Concurrency scaling $N \in \{16, 32, 64, 128, 256\}$, 20-rule audit | Hardware saturation knee, memory bandwidth limits |
+| **17** | **Long-Context & Production Traffic** | Contexts Short (64) to XLong (2048), Production traffic patterns | KV cache memory pressure, prefill/decode balance |
+
+---
+
+## Scientific Validation & The 20-Rule Verification Gate
+
+To prevent benchmarking artifacts, measurement noise, and cherry-picking, InferOpt enforces a **20-predicate verification architecture** across all hardware benchmark runs:
+
+```text
++----------------------------------------------------------------------------------------------------+
+|                                 The 20-Rule Scientific Verification Gate                           |
++----------------------------------------------------------------------------------------------------+
+|  1. Deterministic Workload Hash  | Exact SHA-256 matching across all comparative experimental arms. |
+|  2. Isolated Subprocess          | Clean process spawn per condition; no state leak across runs.   |
+|  3. Warmup Isolation             | Warmup requests explicitly executed & discarded before timing.  |
+|  4. Hardware Engine Verified     | Physical execution confirmed on GPU/Metal (no mock backends).   |
+|  5. Exact Lifecycle Invariant    | Exactly 1 engine initialization and exactly 1 engine teardown.  |
+|  6. Zero Dropped Requests        | 100% request completion; zero failed or missing requests.        |
+|  7. 1:1 ID Preservation          | Output IDs match input request IDs in exact order.              |
+|  8. Non-Empty Outputs            | All generated responses contain valid, non-empty text.           |
+|  9. Non-Negative Token Counts    | Real prompt and generated tokens measured via exact tokenizer.  |
+| 10. Monotonic Time Invariant     | Total latency >= queue_wait + execution_time.                   |
+| 11. Multi-Trial Aggregation      | Multiple repetitions (>=3) reporting mean, median, min, max, std.|
+| 12. Non-Cherry-Picked Reporting  | Outliers preserved; sample standard deviation reported.         |
+| 13. Differential Overhead Metric | Formally quantified control-plane delta relative to direct baseline.|
+| 14. Saturation Knee Detection    | Distinguishes saturation plateaus from true scaling peaks.       |
+| 15. Real Memory Tracking         | Engine teardown cleans and frees CUDA / Metal allocations.      |
+| 16. Reproducible Random Seeds    | Deterministic random seeds across all generation procedures.     |
+| 17. Safe Eager Mode Flagging     | Diagnostic flags (--enforce-eager) explicitly reported.         |
+| 18. SLA Guardrail Compliance     | Automated verification of p95 latency bounds against targets.   |
+| 19. Atomic Reconfiguration Safety| Dynamic config updates preserve 100% of pending queue items.     |
+| 20. JSON Evidence Persistence    | Machine-readable raw artifacts saved for independent audit.      |
++----------------------------------------------------------------------------------------------------+
+```
+
+---
+
+## Installation & Quick Start
+
+### 1. Installation
+
+InferOpt is packaged with optional extras for different hardware environments:
 
 ```bash
-# Run the light benchmark scenario
-python -m inferopt.benchmarks --scenario light
+# Clone repository
+git clone https://github.com/suyash639/InferOpt.git
+cd InferOpt
 
-# Run burst benchmark with custom request count and output file
-python -m inferopt.benchmarks --scenario burst --num-requests 100 -o results/burst_run.json
+# Option A: Core installation (Mock backend, CPU CI, local unit tests)
+pip install -e .
 
-# Run mixed priority scenario with custom batch size and wait window
-python -m inferopt.benchmarks --scenario mixed --max-batch-size 8 --batch-wait-ms 25.0
-```
-
----
-
-## Deterministic Optimization Engine
-
-> [!IMPORTANT]
-> **Step 6 provides deterministic optimization and recommendation infrastructure; it does not yet perform live adaptive scheduling.**
->
-> The optimizer consumes empirical benchmark results (`BenchmarkResult` / `MetricsSnapshot`) or generates grid-search experiment plans across a candidate search space (`CandidateSpace`). It operates strictly as an offline evaluator and planner, ranking candidate configurations deterministically without mutating active schedulers or claiming simulated performance speedups.
-
-```text
-    +-----------------------------------------------------------+
-    |                      Optimizer Input                      |
-    |                                                           |
-    |  +--------------------+         +----------------------+  |
-    |  | Benchmark Evidence |         | Candidate Space      |  |
-    |  | (BenchmarkResult)  |         | (CandidateSpace)     |  |
-    |  +---------+----------+         +----------+-----------+  |
-    |            |                               |              |
-    +------------|-------------------------------|--------------+
-                 |                               |
-                 v                               v
-    +-----------------------------------------------------------+
-    |                 DeterministicOptimizer                    |
-    |                                                           |
-    |  Mode A: Historical Evaluation                            |
-    |    1. Filter candidates against OptimizationConstraints   |
-    |    2. Compute objective score (THROUGHPUT/LATENCY/BALANCED)|
-    |    3. Deterministic tie-breaking hierarchy                |
-    |    4. Emit immutable OptimizationResult                   |
-    |                                                           |
-    |  Mode B: Experiment Planning                              |
-    |    1. Compute Cartesian product over CandidateSpace       |
-    |    2. Generate structured sequence of SchedulerConfig     |
-    +-----------------------------------------------------------+
-```
-
-### Optimization Objectives
-
-The optimizer supports three transparent, deterministic scoring models (`ObjectiveConfig`):
-
-1. **`THROUGHPUT`**: Maximizes processed request throughput ($\text{Score} = \text{requests\_per\_sec}$).
-2. **`LATENCY`**: Minimizes tail latency ($\text{Score} = -\text{p95\_latency\_ms}$).
-3. **`BALANCED`**: Multi-criteria weighted normalization:
-   $$\text{Score} = w_{\text{tput}} \cdot \left(\frac{\text{requests\_per\_sec}}{\text{target\_throughput\_rps}}\right) - w_{\text{lat}} \cdot \left(\frac{\text{p95\_latency\_ms}}{\text{target\_p95\_latency\_ms}}\right)$$
-   where $w_{\text{tput}} + w_{\text{lat}} = 1.0$ and targets normalize units across differing scales.
-
-### Constraint Evaluation
-
-Candidates are evaluated against explicit SLA and operational thresholds (`OptimizationConstraints`):
-- `max_p95_latency_ms`: Rejects configurations whose measured $p95$ latency exceeds the SLA bound.
-- `min_throughput_rps`: Rejects configurations that fail to achieve minimum required throughput.
-- `max_batch_size`: Hardware memory safety bound capping maximum grouped batch size.
-- `max_concurrency`: Limits concurrent in-flight worker count.
-- `max_batch_wait_ms`: Prevents excessive formation delay on interactive workloads.
-- `max_failed_requests`: Zero-tolerance threshold for runtime errors (default: `0`).
-
-Candidates violating any constraint are flagged as infeasible with detailed diagnostic reasons. Infeasible candidates are ranked strictly below all feasible configurations.
-
-### Deterministic Tie-Breaking Hierarchy
-
-When multiple candidates achieve identical objective scores, the engine breaks ties deterministically using a fixed five-tier lexicographical comparator:
-
-1. **Objective Score** (higher is better)
-2. **$p95$ Latency** (lower is better)
-3. **`batch_wait_ms`** (smaller wait window is better)
-4. **`max_batch_size`** (smaller batch footprint is better)
-5. **`max_concurrency`** (lower resource footprint is better)
-
-### Example Usage
-
-```python
-from inferopt.optimizer import (
-    CandidateSpace,
-    DeterministicOptimizer,
-    ObjectiveConfig,
-    OptimizationConstraints,
-    OptimizationObjectiveType,
-)
-
-optimizer = DeterministicOptimizer()
-
-# Mode A: Evaluate historical benchmark results
-objective = ObjectiveConfig(
-    objective_type=OptimizationObjectiveType.BALANCED,
-    throughput_weight=0.6,
-    latency_weight=0.4,
-    target_throughput_rps=50.0,
-    target_p95_latency_ms=30.0,
-)
-constraints = OptimizationConstraints(max_p95_latency_ms=40.0, min_throughput_rps=20.0)
-
-opt_result = optimizer.evaluate_results(
-    benchmark_results=results,
-    objective=objective,
-    constraints=constraints,
-)
-
-if opt_result.is_feasible:
-    print(f"Recommended Config: {opt_result.recommended_config}")
-    print(f"Best Score: {opt_result.best_score:.4f}")
-
-# Mode B: Generate grid-search experiment plan
-space = CandidateSpace(
-    concurrencies=(1, 2, 4),
-    batch_sizes=(1, 2, 4, 8),
-    batch_waits_ms=(0.0, 5.0, 10.0),
-)
-experiment_plan = optimizer.create_experiment_plan(space)
-print(f"Generated {len(experiment_plan)} experimental configurations to run.")
-```
-
----
-
-## Adaptive Scheduling & Closed-Loop Control
-
-> [!IMPORTANT]
-> **Step 7 introduces deterministic closed-loop adaptation. It does not use machine learning or an LLM to make scheduling decisions.**
->
-> The adaptive controller safely modulates live scheduler concurrency and dynamic batching parameters based on observed telemetry windows. All adaptation is conservative, bounded, and explainable, governed by hard anti-oscillation constraints and automated rollback safeguards.
-
-```text
-       +-------------------------------------------------------------+
-       |                      Observed Telemetry                     |
-       |                (MetricsSnapshot / BenchmarkResult)          |
-       +------------------------------+------------------------------+
-                                      |
-                                      v
-       +-------------------------------------------------------------+
-       |                      AdaptiveController                     |
-       |                                                             |
-       |  1. Evaluation Window Gate (min requests & batches)         |
-       |  2. Rollback Check (SLA violation / performance drop)       |
-       |  3. Cooldown Counter Gate (anti-thrashing)                  |
-       |  4. Candidate Ranking (via DeterministicOptimizer)          |
-       |  5. Improvement Threshold & Hysteresis Gate                 |
-       |  6. Safety Bounds Enforcement (min/max limits)              |
-       |  7. Emits Explainable AdaptationDecision                    |
-       +------------------------------+------------------------------+
-                                      | (If Decision == APPLY/ROLLBACK)
-                                      v
-       +-------------------------------------------------------------+
-       |                Scheduler.apply_config()                     |
-       |                                                             |
-       |  - Atomic config update                                     |
-       |  - Dynamic worker pool adjustment                           |
-       |  - Active tasks & queued requests fully preserved           |
-       |  - Telemetry adaptation event recorded                      |
-       +-------------------------------------------------------------+
-```
-
-### Closed-Loop Adaptation Architecture
-
-1. **Evaluation Windows**: The controller never adapts on a single noisy request. Decisions require evidence thresholds (`min_completed_requests` and `min_completed_batches`). If data is insufficient, it emits an `INSUFFICIENT_DATA` decision.
-2. **Improvement Threshold & Hysteresis**: Candidates must exceed a configurable relative (`min_improvement_pct`) or absolute (`min_improvement_abs`) threshold over baseline performance to prevent switching on minor metric fluctuations.
-3. **Cooldown Gating**: Following any configuration update, the controller enforces a cooldown window (`cooldown_windows`) during which further switches are suppressed with a `COOLDOWN` decision.
-4. **Safety Bounds Enforcement**: Candidate configurations must strictly satisfy operational bounds (`min_concurrency`, `max_concurrency`, `min_batch_size`, `max_batch_size`, `min_batch_wait_ms`, `max_batch_wait_ms`).
-5. **Hard SLA & Constraint Protection**: Candidates that violate hard latency limits ($p95$) or throughput constraints are rejected with `INFEASIBLE`.
-6. **Automated Rollback**: If an applied configuration subsequently violates an SLA constraint or degrades objective performance by $\ge \text{rollback\_degradation\_pct}$, the controller immediately issues a `ROLLBACK` decision and reverts the scheduler to the previous known-good configuration.
-
-### Runtime Configuration Semantics (`apply_config`)
-
-When `scheduler.apply_config(new_config)` is invoked on a live running `Scheduler`:
-- **Atomicity**: The configuration object (`self._config`) and batch settings are atomically replaced.
-- **Worker Scaling**:
-  - **Scale Up**: If `max_concurrency` increases, new worker tasks are spawned immediately.
-  - **Scale Down**: If `max_concurrency` decreases, excess workers finish their current batch and cleanly retire without dropping queued requests.
-- **Queue Preservation**: All pending requests in the priority queue remain valid, ordered, and untouched. They are formed into subsequent batches according to the updated `BatchConfig`.
-- **In-Flight Tasks**: Currently executing batches continue on backend runtimes without interruption.
-- **Telemetry Observability**: An immutable `AdaptationEvent` is recorded in `MetricsCollector`.
-
-### Example Usage
-
-```python
-from inferopt.optimizer import (
-    AdaptationPolicy,
-    AdaptiveController,
-    ObjectiveConfig,
-    OptimizationConstraints,
-    OptimizationObjectiveType,
-)
-from inferopt.scheduler import Scheduler
-
-# 1. Define adaptive policy
-policy = AdaptationPolicy(
-    objective=ObjectiveConfig(objective_type=OptimizationObjectiveType.BALANCED),
-    constraints=OptimizationConstraints(max_p95_latency_ms=35.0),
-    min_improvement_pct=10.0,
-    cooldown_windows=2,
-    min_completed_requests=30,
-    min_completed_batches=5,
-    enable_rollback=True,
-)
-
-# 2. Attach to running scheduler
-controller = AdaptiveController(policy=policy, scheduler=scheduler)
-
-# 3. Observe metrics snapshot and step controller
-snapshot = scheduler.collector.snapshot()
-decision = controller.step(snapshot, candidate_evidence=candidates)
-
-if decision.is_applied:
-    print(f"Applied new configuration: {decision.proposed_config}")
-    print(f"Reason: {decision.reason}")
-```
-
----
-
-## Inference Backend Abstraction
-
-```text
-               +-----------------------------+
-               |        InferOpt Core        |
-               |  (Domain Models & Policy)   |
-               +--------------+--------------+
-                              |
-                              v
-               +-----------------------------+
-               |    <<InferenceBackend>>     |
-               |  <<BatchInferenceBackend>>  |
-               |      (Async Protocols)      |
-               +--------------+--------------+
-                              |
-              +---------------+---------------+
-              |                               |
-              v                               v
-     +-----------------+             +-------------------+
-     |   MockBackend   |             |    MLXBackend     |
-     | (Deterministic  |             | (Apple Silicon    |
-     |  & GPU-free)    |             |  Metal GPU / MLX) |
-     +-----------------+             +-------------------+
-```
-
-### Why Backend Abstraction?
-Direct dependencies on specific serving engines (like vLLM or MLX) bind control-plane logic to particular hardware platforms, external C++ extensions, and heavyweight dependencies. By introducing the `InferenceBackend` and `BatchInferenceBackend` protocols, InferOpt standardizes request handling, token accounting, and latency telemetry across all execution engines.
-
-### Purpose of MockBackend
-The `MockBackend` provides a deterministic, GPU-free simulation runtime that:
-- Executes asynchronously without requiring local GPU acceleration or heavy model weights.
-- Produces deterministic, reproducible text outputs and token metrics for any given input request.
-- Simulates configurable asynchronous execution latency to test schedulers, queues, and admission control under controlled timing conditions.
-- Facilitates rapid unit testing and CI pipelines on developer workstations.
-
----
-
-## MLX Backend on Apple Silicon
-
-> [!IMPORTANT]
-> **Step 8 integrates real local execution on Apple Silicon; it does not claim GPU performance superiority for InferOpt.**
->
-> The MLX backend executes real transformer models using Apple's `mlx` and `mlx-lm` libraries, leveraging Metal unified memory on macOS. It enables local end-to-end inference verification, tokenizer accounting, and hardware execution under the InferOpt control plane. Performance comparisons against external GPU serving engines (e.g., vLLM on NVIDIA GPUs) require subsequent cluster benchmarks.
-
-### Key Capabilities
-
-1. **Lazy Loading & Resource Management**: Model weights and tokenizers are loaded on demand during the first inference request with thread-safe locking (`asyncio.Lock`). Resources can be cleanly unloaded via `unload_model()`.
-2. **Deterministic Sampling**: Default sampling temperature is set to `0.0` (greedy argmax) for reproducible evaluation.
-3. **Exact Tokenizer Accounting**: Calculates exact prompt and generated token counts via Hugging Face tokenizers rather than synthetic approximations.
-4. **Hardware-Level Batched Generation**: Single requests use `mlx_lm.generate` while formed batches execute natively on Metal using `mlx_lm.batch_generate` without synthetic loops.
-5. **Zero Required Dependencies**: The core `inferopt` package has zero MLX dependencies. MLX is configured as an optional extra (`pip install "inferopt[mlx]"`).
-
-### Installation
-
-```bash
-# Install InferOpt with Apple Silicon MLX support
+# Option B: Apple Silicon MLX installation (macOS Metal GPU)
 pip install -e ".[mlx]"
+
+# Option C: NVIDIA GPU vLLM installation (Linux + CUDA)
+pip install -e ".[vllm]"
+
+# Option D: Development installation (Linting, type checking, pytest)
+pip install -e ".[dev]"
 ```
 
-### CLI Smoke Test
+### 2. Quick Start: Python API
 
-Verify local MLX execution with the built-in smoke test entry point:
+```python
+import asyncio
+from inferopt.backends.mock import MockBackend
+from inferopt.core.models import InferenceRequest, RequestPriority
+from inferopt.scheduler.config import BatchConfig, SchedulerConfig
+from inferopt.scheduler.scheduler import Scheduler
 
-```bash
-# Run local smoke test with default model (mlx-community/Qwen2.5-0.5B-Instruct-4bit)
-python -m inferopt.backends.mlx --prompt "Explain what InferOpt does in one sentence."
 
-# Run smoke test with custom model and token limit
-python -m inferopt.backends.mlx \
-    --model mlx-community/Qwen2.5-0.5B-Instruct-4bit \
-    --prompt "List three key features of an LLM scheduler." \
-    --max-tokens 48 \
-    --temperature 0.0
-```
+async def main() -> None:
+    # 1. Initialize backend and scheduler
+    backend = MockBackend(base_latency_ms=10.0)
+    config = SchedulerConfig(
+        max_concurrency=4,
+        max_queue_size=100,
+        batch_config=BatchConfig(max_batch_size=4, batch_wait_ms=10.0),
+    )
 
-### Benchmark with MLX Backend
+    async with Scheduler(config=config, backend=backend) as scheduler:
+        # 2. Submit requests with heterogeneous priorities
+        req1 = InferenceRequest(
+            prompt="Explain KV cache memory management in LLMs.",
+            max_tokens=64,
+            priority=RequestPriority.HIGH,
+        )
+        req2 = InferenceRequest(
+            prompt="What is dynamic batching?",
+            max_tokens=32,
+            priority=RequestPriority.NORMAL,
+        )
 
-Run InferOpt benchmark workloads against real Apple Silicon inference:
+        # 3. Await asynchronous resolution
+        resp1, resp2 = await asyncio.gather(
+            scheduler.submit(req1),
+            scheduler.submit(req2),
+        )
 
-```bash
-# Run the light benchmark scenario using MLX backend
-python -m inferopt.benchmarks --scenario light --backend mlx
+        print(f"Response 1: {resp1.text}")
+        print(f"Response 2: {resp2.text}")
 
-# Run burst benchmark scenario with MLX backend and custom model
-python -m inferopt.benchmarks \
-    --scenario burst \
-    --backend mlx \
-    --model mlx-community/Qwen2.5-0.5B-Instruct-4bit \
-    --num-requests 20 \
-    --max-batch-size 4
+        # 4. Inspect real-time telemetry snapshot
+        snapshot = scheduler.collector.snapshot()
+        print(f"Total Completed: {snapshot.requests.completed_count}")
+        print(f"Mean Latency: {snapshot.requests.mean_latency_ms:.2f} ms")
+        print(f"Total Tokens/Sec: {snapshot.throughput.total_tokens_per_sec:.2f}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ---
 
-## Step 8.5 — Real MLX Validation & Controlled Baseline
+## CLI Benchmark & Validation Suite
 
-> [!IMPORTANT]
-> **Step 8.5 validates real MLX execution and establishes a reproducible local baseline. It does not establish that InferOpt outperforms direct MLX.**
->
-> The purpose of Step 8.5 is to rigorously compare Direct MLX execution (unmediated baseline) against InferOpt + MLXBackend under identical workload definitions, models, seeds, decoding parameters, warmup procedures, and machine conditions.
-
-### Validation Methodology
-
-```text
-                  +--------------------------------+
-                  | Workload Scenario (Fixed Seed) |
-                  +---------------+----------------+
-                                  |
-            +---------------------+---------------------+
-            |                                           |
-            v                                           v
-+-----------------------+                   +-----------------------+
-|    DirectMLXRunner    |                   |    BenchmarkRunner    |
-| (Unmediated Baseline) |                   | (Scheduler + Batching)|
-+-----------+-----------+                   +-----------+-----------+
-            |                                           |
-            v                                           v
-+-----------------------+                   +-----------------------+
-|  DirectMLXResult (3x) |                   |  BenchmarkResult (3x) |
-+-----------+-----------+                   +-----------+-----------+
-            |                                           |
-            +---------------------+---------------------+
-                                  |
-                                  v
-                  +--------------------------------+
-                  |         Correctness Gate       |
-                  |  - Exact 1:1 ID preservation   |
-                  |  - Valid non-empty output text |
-                  |  - Non-negative token counts   |
-                  +---------------+----------------+
-                                  |
-                                  v
-                  +--------------------------------+
-                  | Neutral Metric Comparison Table|
-                  |     (p50, p95, TPS, Deltas)    |
-                  +--------------------------------+
-```
-
-1. **Experimental Invariance**: Both pipelines evaluate the exact same sequence of requests, prompt texts, `max_tokens`, `temperature=0.0`, and random seed.
-2. **Warmup Separation**: Executes a configurable number of warmup requests (default: 1) before timed measurement. Warmup outputs and timings are discarded and recorded in metadata.
-3. **Repeated Trials**: Executes multiple measured repetitions (default: 3) for warm measurements, reporting mean, median, pooled $p50/p95/p99$ percentiles, throughput, and sample standard deviation.
-4. **Correctness Gating**: Verifies completion counts, duplicate ID absence, non-empty outputs, and non-negative token counts before presenting comparisons.
-5. **Batching Matrix**: Evaluates concurrency ($4, 8, 16$) across dynamic batch sizes ($1, 2, 4, 8$) to quantify hardware batching amortization on Metal unified memory.
-
-### Running Validation Experiments
+InferOpt includes a rich CLI for reproducible benchmarking and scientific validation:
 
 ```bash
-# 1. Run controlled comparison on single request scenario
+# ==============================================================================
+# 1. Synthetic Workload Benchmark (Step 5)
+# ==============================================================================
+python -m inferopt.benchmarks --scenario light --backend mock
+python -m inferopt.benchmarks --scenario burst --num-requests 100 --backend mock
+
+# ==============================================================================
+# 2. Apple Silicon MLX Controlled Validation (Step 8.5)
+# ==============================================================================
+# Single request controlled baseline comparison
 python -m inferopt.benchmarks --validate-mlx --scenario single --warmup 1 --repetitions 3
 
-# 2. Run controlled comparison on 4 concurrent requests
-python -m inferopt.benchmarks --validate-mlx --scenario concurrent_4 --warmup 1 --repetitions 3
-
-# 3. Run full batching experiment matrix (4,8,16 concurrency x 1,2,4,8 batch size)
+# Full batching matrix on Metal GPU (4, 8, 16 concurrency x 1, 2, 4, 8 batch size)
 python -m inferopt.benchmarks --validate-mlx --batch-matrix
-```
 
-All validation results are persisted in JSON format under `benchmarks/results/mlx_validation/`.
-
----
-
-## vLLM Backend Integration (NVIDIA GPU Serving)
-
-InferOpt integrates with [vLLM](https://github.com/vllm-project/vllm) for high-throughput GPU serving in production environments.
-
-### Architectural Separation
-* **vLLM as the Engine**: vLLM provides the underlying inference engine, handling low-level CUDA execution, PagedAttention, KV-cache memory management, and token generation kernels.
-* **InferOpt as the Control Plane**: InferOpt sits above vLLM, managing multi-tenant prioritization, dynamic batch formation windows, bounded concurrency, backpressure, closed-loop telemetry adaptation, and model routing.
-* **Native Batched Generation**: `VLLMBackend.generate_batch()` executes formed batches using vLLM's native batch generation API (`LLM.generate(prompts=..., sampling_params=...)`) without synthetic gathering loops.
-
-### Optional Installation
-vLLM is an optional dependency and is not required for core InferOpt development on Apple Silicon or CPU CI environments:
-
-```bash
-# Install InferOpt with vLLM support (requires Linux + NVIDIA CUDA GPU)
-pip install -e ".[vllm]"
-```
-
-### Scientific Real-vLLM Benchmark Harness (Step 10)
-
-InferOpt provides a scientifically controlled benchmark harness to evaluate serving overhead, batching efficiency, and latency-throughput tradeoffs against real vLLM on NVIDIA GPUs (e.g. Kaggle T4).
-
-#### Experimental Conditions
-* **Condition A (Direct vLLM)**: Unmediated execution directly invoking `vllm.LLM` without the InferOpt scheduler (baseline).
-* **Condition B (InferOpt Batch 1)**: Full InferOpt scheduler and telemetry pipeline with `max_batch_size = 1`.
-* **Condition C (InferOpt Batch 2)**: Dynamic batching with `max_batch_size = 2`.
-* **Condition D (InferOpt Batch 4)**: Dynamic batching with `max_batch_size = 4`.
-* **Condition E (InferOpt Batch 8)**: Dynamic batching with `max_batch_size = 8`.
-
-#### Scientific Controls
-* **Workload Replay & Hash**: Workloads are generated once and assigned a deterministic SHA-256 hash. The identical sequence of prompts, request IDs, and sampling parameters is replayed across every condition.
-* **Warmup & Cold-Start Isolation**: Engine initialization, CUDA memory allocation, and warmup iterations are explicitly separated from steady-state timing.
-* **Repetition Aggregation**: Multiple trials (default: 3) collect mean, median (p50), min, max, and sample standard deviations without cherry-picking.
-* **Integrity Gate**: Automatically verifies 100% request completion, 1:1 ID preservation, non-empty outputs, real tokenizer token counts, and identical workload hashes before results are accepted.
-* **Differential Overhead**: Formally calculates the end-to-end differential overhead relative to Direct vLLM.
-
-```bash
-# Run full 5-condition scientific benchmark on NVIDIA GPU (Default CUDA graph mode)
+# ==============================================================================
+# 3. NVIDIA GPU vLLM Scientific Validation (Step 10)
+# ==============================================================================
+# 5-condition GPU benchmark (Direct vLLM vs InferOpt Batch 1, 2, 4, 8)
 python -m inferopt.benchmarks.cli --validate-vllm \
     --concurrency 1 4 8 16 \
     --batch-sizes 1 2 4 8 \
     --repetitions 3 \
     --warmup 2
 
-# Or run via standalone script
-python scripts/run_vllm_benchmark.py --concurrency 1 4 8 16 --batch-sizes 1 2 4 8
+# ==============================================================================
+# 4. Dynamic Workload Transitions (Step 13)
+# ==============================================================================
+python -m inferopt.benchmarks.cli --step13-transitions --backend mock
 
-# Diagnostic Mode: Enforce eager execution (disables CUDA graphs)
-# Used for environments encountering vLLM V1 EngineCore socket initialization issues
-python -m inferopt.benchmarks.cli --validate-vllm --enforce-eager
+# ==============================================================================
+# 5. SLA-Constrained Adaptive Control (Step 14)
+# ==============================================================================
+python -m inferopt.benchmarks.cli --step14-sla-adaptive --sla-p95 50.0 --backend mock
+
+# ==============================================================================
+# 6. Heavy-Load Scalability & Saturation (Step 16)
+# ==============================================================================
+python -m inferopt.benchmarks.cli --step16-scalability \
+    --concurrency-levels 16 32 64 128 256 \
+    --model HuggingFaceTB/SmolLM2-1.7B-Instruct
+
+# ==============================================================================
+# 7. Long-Context & Production-Like Traffic (Step 17)
+# ==============================================================================
+python -m inferopt.benchmarks.cli --step17-long-context \
+    --traffic-patterns STEADY BURSTY MIXED LONG_CONTEXT_BURST \
+    --context-lengths SHORT MEDIUM LONG XLONG
 ```
-
-> [!IMPORTANT]
-> **Diagnostic Mode (`--enforce-eager`) & Benchmark Comparability**:
->
-> 1. **Diagnostic & Compatibility Purpose**: `--enforce-eager` is provided as an opt-in diagnostic and compatibility option for environments (such as containerized or virtualized GPU platforms like Kaggle) where default vLLM V1 engine initialization encounters IPC/socket startup failures (specifically `ValueError: b'\x00\x00' is not a valid EngineCoreRequestType` in `process_input_sockets()`).
-> 2. **Not a Root Cause Fix**: Enabling eager execution bypasses CUDA graph capture and compilation, providing a working diagnostic inference path. It does *not* fix the underlying vLLM V1 EngineCore socket/IPC issue.
-> 3. **Comparability Warning**: Eager execution disables `torch.compile` and CUDA graph execution, incurring per-request Python/CUDA kernel launch overhead. Therefore, results collected with `--enforce-eager` **MUST NOT** be presented as directly comparable to standard production or default vLLM performance runs.
-> 4. **Production Default**: The default configuration remains `enforce_eager=False` to preserve full CUDA graph capture, compilation, and standard production serving semantics.
-
-Results are persisted as structured JSON in `benchmarks/results/vllm/`.
 
 ---
 
-## Development Environment
+## Repository Structure & Development Standards
 
-- **Local Platform**: Developed and validated on Apple Silicon (macOS) with zero direct hardware coupling in the core library.
-- **Backend Portability**: The system architecture enforces a backend-agnostic design using strict Python protocols (`InferenceBackend`, `BatchInferenceBackend`). This allows full local development and testing using mock or MLX backends without requiring local NVIDIA GPU hardware, while ensuring immediate compatibility with vLLM when deployed to GPU infrastructure.
+```text
+InferOpt/
+├── src/inferopt/
+│   ├── api/                    # FastAPI endpoints & request schemas
+│   ├── backends/               # Pluggable backend execution runtimes
+│   │   ├── base.py             # InferenceBackend & BatchInferenceBackend protocols
+│   │   ├── mock.py             # Deterministic GPU-free simulation backend
+│   │   ├── mlx.py              # Apple Silicon Metal GPU runtime
+│   │   └── vllm.py             # NVIDIA CUDA GPU vLLM runtime
+│   ├── benchmarks/             # Scientific benchmark suite & validation runners
+│   │   ├── cli.py              # Unified CLI benchmark entrypoint
+│   │   ├── generator.py        # Deterministic workload generation & hashing
+│   │   ├── mlx_validation.py   # Step 8.5 Apple Silicon validation harness
+│   │   ├── vllm_validation.py  # Step 10 NVIDIA vLLM validation harness
+│   │   ├── step11_*.py         # Workload-aware batch selection experiments
+│   │   ├── step12_*.py         # Multi-workload generalization experiments
+│   │   ├── step13_*.py         # Online dynamic reconfiguration experiments
+│   │   ├── step14_*.py         # SLA-constrained adaptive control experiments
+│   │   ├── step15_*.py         # Multi-model generalization experiments
+│   │   ├── step16_*.py         # Heavy-load scalability & saturation validation
+│   │   └── step17_*.py         # Long-context & production traffic validation
+│   ├── core/                   # Core domain models, enums, exceptions
+│   ├── optimizer/              # Deterministic Pareto optimizer & SLA controller
+│   ├── router/                 # Request routing & multi-instance load balancing
+│   ├── scheduler/              # Asynchronous priority scheduler & dynamic batcher
+│   └── telemetry/              # High-resolution timers, metrics collector & snapshots
+├── tests/
+│   ├── unit/                   # Comprehensive unit tests (369 tests, 100% passing)
+│   └── integration/            # Multi-backend end-to-end integration tests
+├── scripts/                    # Standalone utility & experiment runners
+├── pyproject.toml              # Build config, dependencies, extras, and tool settings
+└── README.md                   # System documentation and architectural diagrams
+```
 
+### Quality Assurance & Verification Commands
 
+InferOpt adheres to strict software engineering standards:
 
+```bash
+# Run complete unit and integration test suite
+uv run pytest -q
+
+# Run strict type checking (0 errors across codebase)
+uv run mypy src --strict
+
+# Run code style and lint checks
+uv run ruff check .
+uv run ruff format --check .
+```
+
+---
+
+<div align="center">
+
+**InferOpt is engineered with mathematical precision, architectural discipline, and zero unverified performance claims.**
+
+</div>
