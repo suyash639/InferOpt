@@ -42,3 +42,4 @@ coverage.xml
 benchmarks/results/
 logs/
 *.log
+.playwright-mcp/

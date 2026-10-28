@@ -106,62 +106,55 @@ The following diagram illustrates the complete InferOpt architecture, showing th
 ```mermaid
 flowchart TB
     subgraph ClientLayer["Client Layer"]
-        Client["Client / Application\n(HTTP / gRPC / SDK)"]
+        Client["Client / Application<br/>(HTTP / gRPC / SDK)"]
     end
 
     subgraph APILayer["API Ingress Layer"]
-        FastAPIApp["FastAPI Ingestion\n(/v1/completions, /health, /metrics)"]
+        FastAPIApp["FastAPI Ingestion<br/>(/v1/completions, /health, /metrics)"]
     end
 
     subgraph ControlPlane["InferOpt Control Plane"]
-        Scheduler["Asynchronous Priority Scheduler\n(inferopt.scheduler.Scheduler)"]
-        PriorityQueue["Bounded Priority Queue\n(Priority + Monotonic FIFO)"]
-        DynamicBatcher["Dynamic Batching Subsystem\n(max_batch_size, batch_wait_ms)"]
-        WorkerPool["Bounded Async Worker Pool\n(max_concurrency)"]
+        Scheduler["Asynchronous Priority Scheduler<br/>(inferopt.scheduler.Scheduler)"]
+        PriorityQueue["Bounded Priority Queue<br/>(Priority + Monotonic FIFO)"]
+        DynamicBatcher["Dynamic Batching Subsystem<br/>(max_batch_size, batch_wait_ms)"]
+        WorkerPool["Bounded Async Worker Pool<br/>(max_concurrency)"]
     end
 
     subgraph TelemetrySubsystem["Telemetry & Observability"]
-        Collector["MetricsCollector\n(Nanosecond High-Resolution Timers)"]
-        Snapshots["MetricsSnapshot\n(p50, p90, p95, p99, TTFT, ITL, TPS)"]
+        Collector["MetricsCollector<br/>(Nanosecond High-Resolution Timers)"]
+        Snapshots["MetricsSnapshot<br/>(p50, p90, p95, p99, TTFT, ITL, TPS)"]
     end
 
     subgraph OptimizationSubsystem["Optimization & Closed-Loop Control"]
-        Optimizer["DeterministicOptimizer\n(Pareto Search Space Explorer)"]
-        RegimeDetector["Traffic Regime Detector\n(LIGHT, BURSTY, SATURATED, MIXED)"]
-        SLAController["SLA-Constrained Adaptive Controller\n(Min-Dwell Damping & Automated Rollback)"]
+        Optimizer["DeterministicOptimizer<br/>(Pareto Search Space Explorer)"]
+        RegimeDetector["Traffic Regime Detector<br/>(LIGHT, BURSTY, SATURATED, MIXED)"]
+        SLAController["SLA-Constrained Adaptive Controller<br/>(Min-Dwell Damping & Automated Rollback)"]
     end
 
-    subgraph BackendLayer["Backend Abstraction Layer (Protocols)"]
-        Protocol["<<InferenceBackendProtocol>>\n<<BatchInferenceBackendProtocol>>"]
-        Mock["MockBackend\n(GPU-free Simulation & CI)"]
-        MLX["MLXBackend\n(Apple Silicon Metal Unified Memory)"]
-        VLLM["VLLMBackend\n(NVIDIA CUDA / PagedAttention)"]
+    subgraph BackendLayer["Backend Abstraction Layer"]
+        Protocol["Backend Protocols<br/>InferenceBackendProtocol<br/>BatchInferenceBackendProtocol"]
+        Mock["MockBackend<br/>(GPU-free Simulation & CI)"]
+        MLX["MLXBackend<br/>(Apple Silicon Metal Unified Memory)"]
+        VLLM["VLLMBackend<br/>(NVIDIA CUDA / PagedAttention)"]
     end
 
-    Client -->|InferenceRequest| FastAPIApp
-    FastAPIApp -->|submit()| Scheduler
+    Client -->|"InferenceRequest"| FastAPIApp
+    FastAPIApp -->|"submit()"| Scheduler
     Scheduler --> PriorityQueue
     PriorityQueue --> DynamicBatcher
     DynamicBatcher --> WorkerPool
-    WorkerPool -->|InferenceBatch| Protocol
+    WorkerPool -->|"InferenceBatch"| Protocol
     Protocol --> Mock
     Protocol --> MLX
     Protocol --> VLLM
 
-    WorkerPool -.->|Lifecycle Timings| Collector
+    WorkerPool -.->|"Lifecycle Timings"| Collector
     Collector --> Snapshots
     Snapshots --> RegimeDetector
     Snapshots --> SLAController
     RegimeDetector --> SLAController
-    Optimizer -.->|Candidate Ladder| SLAController
-    SLAController -->|apply_config()| Scheduler
-
-    style ClientLayer fill:#f9f9fb,stroke:#6b7280,stroke-width:1px
-    style APILayer fill:#eff6ff,stroke:#3b82f6,stroke-width:1px
-    style ControlPlane fill:#f0fdf4,stroke:#22c55e,stroke-width:1px
-    style TelemetrySubsystem fill:#fefce8,stroke:#eab308,stroke-width:1px
-    style OptimizationSubsystem fill:#faf5ff,stroke:#a855f7,stroke-width:1px
-    style BackendLayer fill:#fff1f2,stroke:#f43f5e,stroke-width:1px
+    Optimizer -.->|"Candidate Ladder"| SLAController
+    SLAController -->|"apply_config()"| Scheduler
 ```
 
 ---
@@ -180,7 +173,7 @@ sequenceDiagram
     participant Sched as Scheduler Queue
     participant Batcher as Dynamic Batcher
     participant Worker as Worker Task
-    participant Backend as Backend Engine (vLLM/MLX)
+    participant Backend as Backend Engine (vLLM / MLX)
     participant Telem as MetricsCollector
 
     Client->>API: POST /v1/completions (InferenceRequest)
@@ -204,7 +197,7 @@ sequenceDiagram
     Batcher->>Sched: Dequeue available requests
     alt Batch is full (size == max_batch_size)
         Batcher->>Worker: Dispatch immediately
-    else Partial batch & batch_wait_ms > 0
+    else Partial batch and batch_wait_ms > 0
         Batcher->>Batcher: Wait up to batch_wait_ms for arrivals
         Batcher->>Worker: Dispatch assembled InferenceBatch
     end
@@ -233,33 +226,28 @@ InferOpt uses an intelligent batch formation algorithm that maximizes hardware s
 
 ```mermaid
 flowchart TD
-    Start([Worker Becomes Idle]) --> DequeueFirst[Dequeue Highest Priority Request from PriorityQueue]
-    DequeueFirst --> CheckEmpty{Queue Empty?}
+    Start(["Worker Becomes Idle"]) --> DequeueFirst["Dequeue Highest Priority Request from PriorityQueue"]
+    DequeueFirst --> CheckEmpty{"Queue Empty?"}
 
-    CheckEmpty -- Yes --> WaitSignal[Wait on Queue Condition Variable]
+    CheckEmpty -->|"Yes"| WaitSignal["Wait on Queue Condition Variable"]
     WaitSignal --> DequeueFirst
 
-    CheckEmpty -- No --> AddToBatch[Add request to current batch candidate]
-    AddToBatch --> CheckCap{Batch size == max_batch_size?}
+    CheckEmpty -->|"No"| AddToBatch["Add request to current batch candidate"]
+    AddToBatch --> CheckCap{"Batch size == max_batch_size?"}
 
-    CheckCap -- Yes --> ImmediateDispatch[Dispatch Batch Immediately\nZero extra delay]
-    CheckCap -- No --> CheckWaitWindow{batch_wait_ms > 0.0?}
+    CheckCap -->|"Yes"| ImmediateDispatch["Dispatch Batch Immediately<br/>Zero extra delay"]
+    CheckCap -->|"No"| CheckWaitWindow{"batch_wait_ms > 0.0?"}
 
-    CheckWaitWindow -- No --> ImmediateDispatch
-    CheckWaitWindow -- Yes --> StartTimer[Start Monotonic Wait Timer\nDuration: batch_wait_ms]
+    CheckWaitWindow -->|"No"| ImmediateDispatch
+    CheckWaitWindow -->|"Yes"| StartTimer["Start Monotonic Wait Timer<br/>Duration: batch_wait_ms"]
 
-    StartTimer --> WaitForMore{New Request Arrives\nbefore timeout?}
-    WaitForMore -- Yes --> DequeueNext[Dequeue next highest priority request]
+    StartTimer --> WaitForMore{"New Request Arrives<br/>before timeout?"}
+    WaitForMore -->|"Yes"| DequeueNext["Dequeue next highest priority request"]
     DequeueNext --> AddToBatch
-    WaitForMore -- No / Timeout --> TimeoutDispatch[Dispatch Partial Batch Immediately]
+    WaitForMore -->|"No / Timeout"| TimeoutDispatch["Dispatch Partial Batch Immediately"]
 
-    ImmediateDispatch --> ExecuteBatch([Send to Backend Protocol])
+    ImmediateDispatch --> ExecuteBatch(["Send to Backend Protocol"])
     TimeoutDispatch --> ExecuteBatch
-
-    style Start fill:#eff6ff,stroke:#3b82f6
-    style ExecuteBatch fill:#f0fdf4,stroke:#22c55e
-    style ImmediateDispatch fill:#dcfce7,stroke:#16a34a
-    style TimeoutDispatch fill:#fef9c3,stroke:#ca8a04
 ```
 
 ---
@@ -271,37 +259,33 @@ InferOpt continuously monitors empirical performance through rolling telemetry w
 ```mermaid
 flowchart TD
     subgraph Monitoring["1. Telemetry Aggregation"]
-        RawMetrics[Raw Request & Batch Metrics] --> Collector[MetricsCollector]
-        Collector --> Snapshot[MetricsSnapshot Window\np50, p95, throughput, queue_depth]
+        RawMetrics["Raw Request & Batch Metrics"] --> Collector["MetricsCollector"]
+        Collector --> Snapshot["MetricsSnapshot Window<br/>p50, p95, throughput, queue_depth"]
     end
 
     subgraph Decision["2. Adaptive Decision Engine"]
-        Snapshot --> Gate1{Data Sufficiency Gate\nmin_requests & min_batches met?}
-        Gate1 -- No --> Hold1[Emit Decision: INSUFFICIENT_DATA\nKeep current configuration]
-        Gate1 -- Yes --> Gate2{Cooldown / Dwell Gate\nmin_dwell_windows elapsed?}
-        Gate2 -- No --> Hold2[Emit Decision: COOLDOWN\nPrevent thrashing/oscillation]
-        Gate2 -- Yes --> SLACheck{SLA Violation?\nmeasured p95 > SLA threshold}
+        Snapshot --> Gate1{"Data Sufficiency Gate<br/>min_requests & min_batches met?"}
+        Gate1 -->|"No"| Hold1["Emit Decision: INSUFFICIENT_DATA<br/>Keep current configuration"]
+        Gate1 -->|"Yes"| Gate2{"Cooldown / Dwell Gate<br/>min_dwell_windows elapsed?"}
+        Gate2 -->|"No"| Hold2["Emit Decision: COOLDOWN<br/>Prevent thrashing/oscillation"]
+        Gate2 -->|"Yes"| SLACheck{"SLA Violation?<br/>measured p95 > SLA threshold"}
 
-        SLACheck -- Yes --> RollbackCheck{Prior Safe Config\nAvailable?}
-        RollbackCheck -- Yes --> Rollback[Emit Decision: ROLLBACK\nRevert to known safe configuration]
-        RollbackCheck -- No --> Downscale[Select More Conservative Pareto Point\ne.g., lower concurrency / smaller batch]
+        SLACheck -->|"Yes"| RollbackCheck{"Prior Safe Config<br/>Available?"}
+        RollbackCheck -->|"Yes"| Rollback["Emit Decision: ROLLBACK<br/>Revert to known safe configuration"]
+        RollbackCheck -->|"No"| Downscale["Select More Conservative Pareto Point<br/>(lower concurrency / smaller batch)"]
 
-        SLACheck -- No --> RegimeEval[Detect Traffic Regime\nLIGHT, BURSTY, SATURATED, MIXED]
-        RegimeEval --> ParetoRank[Evaluate Candidate Space via DeterministicOptimizer\nMaximize TPS subject to Latency SLA]
-        ParetoRank --> HysteresisGate{Improvement > min_improvement_pct?}
-        HysteresisGate -- No --> Hold3[Emit Decision: NO_CHANGE\nFluctuation within noise floor]
-        HysteresisGate -- Yes --> ApplyNew[Emit Decision: APPLY\nNew Config: (concurrency, batch_size, wait_ms)]
+        SLACheck -->|"No"| RegimeEval["Detect Traffic Regime<br/>LIGHT, BURSTY, SATURATED, MIXED"]
+        RegimeEval --> ParetoRank["Evaluate Candidate Space via DeterministicOptimizer<br/>Maximize TPS subject to Latency SLA"]
+        ParetoRank --> HysteresisGate{"Improvement > min_improvement_pct?"}
+        HysteresisGate -->|"No"| Hold3["Emit Decision: NO_CHANGE<br/>Fluctuation within noise floor"]
+        HysteresisGate -->|"Yes"| ApplyNew["Emit Decision: APPLY<br/>New Config: (concurrency, batch_size, wait_ms)"]
     end
 
     subgraph Execution["3. Live Scheduler Reconfiguration"]
-        ApplyNew --> AtomicUpdate[Scheduler.apply_config\n1. Replace config atomically\n2. Scale worker pool dynamically\n3. Preserve all queued & in-flight requests]
+        ApplyNew --> AtomicUpdate["Scheduler.apply_config<br/>1. Replace config atomically<br/>2. Scale worker pool dynamically<br/>3. Preserve all queued & in-flight requests"]
         Rollback --> AtomicUpdate
         Downscale --> AtomicUpdate
     end
-
-    style Monitoring fill:#f8fafc,stroke:#64748b
-    style Decision fill:#faf5ff,stroke:#a855f7
-    style Execution fill:#f0fdf4,stroke:#22c55e
 ```
 
 ---
@@ -313,35 +297,30 @@ To ensure 100% scientific validity and prevent CUDA/Metal memory leaks between b
 ```mermaid
 flowchart TD
     subgraph ParentRunner["Parent Process (Benchmark Orchestrator)"]
-        WorkloadGen[Generate Workload Scenario] --> HashWorkload[Compute Workload SHA-256 Hash]
-        HashWorkload --> PlanMatrix[Build Experimental Grid Matrix\ne.g. Concurrency x Batch Size]
-        PlanMatrix --> LoopConditions[For each experimental condition...]
+        WorkloadGen["Generate Workload Scenario"] --> HashWorkload["Compute Workload SHA-256 Hash"]
+        HashWorkload --> PlanMatrix["Build Experimental Grid Matrix<br/>(e.g., Concurrency x Batch Size)"]
+        PlanMatrix --> LoopConditions["For each experimental condition..."]
     end
 
     subgraph ProcessBoundary["Process Isolation Barrier (multiprocessing)"]
-        LoopConditions --> SpawnChild[Spawn Isolated Subprocess\nFork / Spawn with clean memory]
+        LoopConditions --> SpawnChild["Spawn Isolated Subprocess<br/>Clean process memory"]
     end
 
     subgraph ChildProcess["Isolated Subprocess (Single Experimental Trial)"]
-        SpawnChild --> InitEngine[Initialize Backend Engine\nvLLM / MLX / Mock]
-        InitEngine --> RunWarmup[Execute N Warmup Iterations\nDiscard warmup outputs & timings]
-        RunWarmup --> ReplayWorkload[Replay SHA-256 Workload Exact Sequence]
-        ReplayWorkload --> RecordTimers[Record High-Resolution Timers & Tokens]
-        RecordTimers --> TeardownEngine[Explicit Engine Teardown\nengine.teardown() + CUDA cache purge]
-        TeardownEngine --> ReturnMetrics[Serialize Metrics & Hardware Confirmation]
+        SpawnChild --> InitEngine["Initialize Backend Engine<br/>(vLLM / MLX / Mock)"]
+        InitEngine --> RunWarmup["Execute N Warmup Iterations<br/>Discard warmup outputs & timings"]
+        RunWarmup --> ReplayWorkload["Replay SHA-256 Workload Exact Sequence"]
+        ReplayWorkload --> RecordTimers["Record High-Resolution Timers & Tokens"]
+        RecordTimers --> TeardownEngine["Explicit Engine Teardown<br/>engine.teardown() & memory purge"]
+        TeardownEngine --> ReturnMetrics["Serialize Metrics & Hardware Confirmation"]
     end
 
     subgraph Aggregation["Parent Result Reconciliation & Verification"]
-        ReturnMetrics --> IPCPipe[Transfer JSON via Pipe / Temp File]
-        IPCPipe --> VerifyGate{20-Predicate Verification Gate\n- Workload hash match\n- Exactly 1 init & teardown\n- Hardware engine verified\n- Zero dropped requests}
-        VerifyGate -- Pass --> AggregateResults[Compute Mean, Median, p95, TPS, StdDev]
-        VerifyGate -- Fail --> AbortInvalid[Mark Run Invalid & Report Diagnostic]
+        ReturnMetrics --> IPCPipe["Transfer JSON via Pipe / Temp File"]
+        IPCPipe --> VerifyGate{"20-Predicate Verification Gate<br/>• Workload hash match<br/>• Exactly 1 init & teardown<br/>• Hardware engine verified<br/>• Zero dropped requests"}
+        VerifyGate -->|"Pass"| AggregateResults["Compute Mean, Median, p95, TPS, StdDev"]
+        VerifyGate -->|"Fail"| AbortInvalid["Mark Run Invalid & Report Diagnostic"]
     end
-
-    style ParentRunner fill:#eff6ff,stroke:#3b82f6
-    style ProcessBoundary fill:#fef2f2,stroke:#ef4444,stroke-dasharray: 5 5
-    style ChildProcess fill:#f0fdf4,stroke:#22c55e
-    style Aggregation fill:#faf5ff,stroke:#a855f7
 ```
 
 ---
@@ -350,11 +329,11 @@ flowchart TD
 
 ### 1. Asynchronous Priority Scheduler
 
-Located in [`src/inferopt/scheduler/`](file:///Users/suyashtiwari/Documents/Inferopt/src/inferopt/scheduler/), the `Scheduler` coordinates all request traffic.
+Located in [`src/inferopt/scheduler/`](src/inferopt/scheduler/), the `Scheduler` coordinates all request traffic.
 
 - **Priority Queueing with Monotonic FIFO**:
   Requests are stored in an internal priority heap sorted by a 2-tuple:
-  $$\text{Queue Key} = (\text{priority.value}, \text{arrival\_monotonic\_counter})$$
+  $$\text{Queue Key} = (\text{priority}, \text{arrival\_monotonic\_counter})$$
   Higher numerical priority values are dequeued first. Within identical priority tiers, requests are strictly dispatched in first-in-first-out (FIFO) order using a monotonically increasing sequence counter, preventing starvation and head-of-line anomalies.
 - **Bounded Queue & Backpressure**:
   When pending requests reach `max_queue_size`, subsequent submissions are immediately rejected with a `QueueFullError`, protecting backend runtimes from unbounded memory exhaustion.
@@ -380,7 +359,7 @@ $$\text{Batch Parameters} = (\text{max\_batch\_size}, \text{batch\_wait\_ms})$$
 
 ### 3. High-Resolution In-Process Telemetry
 
-Located in [`src/inferopt/telemetry/`](file:///Users/suyashtiwari/Documents/Inferopt/src/inferopt/telemetry/), the telemetry layer measures every phase of the inference lifecycle using nanosecond-precision monotonic clocks (`time.perf_counter()`):
+Located in [`src/inferopt/telemetry/`](src/inferopt/telemetry/), the telemetry layer measures every phase of the inference lifecycle using nanosecond-precision monotonic clocks (`time.perf_counter()`):
 
 ```text
 Request Submission
@@ -408,7 +387,7 @@ Final Token Emitted
 
 ### 4. Deterministic Optimization Engine
 
-Located in [`src/inferopt/optimizer/`](file:///Users/suyashtiwari/Documents/Inferopt/src/inferopt/optimizer/), the `DeterministicOptimizer` evaluates configurations across a Cartesian candidate space:
+Located in [`src/inferopt/optimizer/`](src/inferopt/optimizer/), the `DeterministicOptimizer` evaluates configurations across a Cartesian candidate space:
 
 $$\text{Candidate Space} = \mathcal{C} \times \mathcal{B} \times \mathcal{W} = \{\text{concurrency}\} \times \{\text{batch\_size}\} \times \{\text{batch\_wait\_ms}\}$$
 
@@ -434,7 +413,7 @@ When two candidate configurations achieve identical objective scores, ties are r
 
 ### 5. SLA-Constrained Adaptive Controller
 
-Located in [`src/inferopt/optimizer/sla_controller.py`](file:///Users/suyashtiwari/Documents/Inferopt/src/inferopt/optimizer/sla_controller.py), the `SLAAdaptiveController` provides safe, closed-loop runtime control:
+Located in [`src/inferopt/optimizer/sla_controller.py`](src/inferopt/optimizer/sla_controller.py), the `SLAAdaptiveController` provides safe, closed-loop runtime control:
 
 - **Pareto Candidate Ladder**: Ranks all verified feasible configurations along the Pareto efficiency frontier.
 - **Min-Dwell Hysteresis**: Requires the system to remain in a given configuration for a minimum number of evaluation windows (`min_dwell_windows`) before permitting another transition, eliminating oscillation and control thrashing.
@@ -444,7 +423,7 @@ Located in [`src/inferopt/optimizer/sla_controller.py`](file:///Users/suyashtiwa
 
 ### 6. Pluggable Backend Abstraction
 
-InferOpt defines clean async protocols in [`src/inferopt/backends/base.py`](file:///Users/suyashtiwari/Documents/Inferopt/src/inferopt/backends/base.py):
+InferOpt defines clean async protocols in [`src/inferopt/backends/base.py`](src/inferopt/backends/base.py):
 
 | Backend | Target Hardware | Execution Engine | Use Case |
 | :--- | :--- | :--- | :--- |
@@ -460,7 +439,7 @@ InferOpt has been developed through a disciplined, milestone-driven scientific p
 
 | Step | Milestone Name | Key Technical Additions | Validation Focus |
 | :---: | :--- | :--- | :--- |
-| **1** | **Core Domain Models & Protocols** | `InferenceRequest`, `InferenceResponse`, `RequestPriority`, `InferenceBackendProtocol` | Immutable domain structures, type safety |
+| **1** | **Core Domain Models & Protocols** | `InferenceRequest`, `InferenceResponse`, priority scheduling, `InferenceBackendProtocol` | Immutable domain structures, type safety |
 | **2** | **Asynchronous Scheduler** | Bounded priority queue, monotonic FIFO tie-breaker, worker lifecycle | Queue bounding, backpressure (`QueueFullError`) |
 | **3** | **Dynamic Batching Engine** | `BatchConfig`, `InferenceBatch`, wait windows, timeout dispatch | Immediate vs wait-window batch formation |
 | **4** | **In-Process Telemetry Foundation** | `MetricsCollector`, `RequestMetrics`, `MetricsSnapshot`, $p50/p90/p95/p99$ | Nanosecond timers, TTFT, ITL, token throughput |
@@ -543,14 +522,14 @@ pip install -e ".[dev]"
 ```python
 import asyncio
 from inferopt.backends.mock import MockBackend
-from inferopt.core.models import InferenceRequest, RequestPriority
+from inferopt.core.models import InferenceRequest
 from inferopt.scheduler.config import BatchConfig, SchedulerConfig
 from inferopt.scheduler.scheduler import Scheduler
 
 
 async def main() -> None:
     # 1. Initialize backend and scheduler
-    backend = MockBackend(base_latency_ms=10.0)
+    backend = MockBackend(default_latency_sec=0.01)
     config = SchedulerConfig(
         max_concurrency=4,
         max_queue_size=100,
@@ -560,14 +539,16 @@ async def main() -> None:
     async with Scheduler(config=config, backend=backend) as scheduler:
         # 2. Submit requests with heterogeneous priorities
         req1 = InferenceRequest(
+            model="mock-model",
             prompt="Explain KV cache memory management in LLMs.",
             max_tokens=64,
-            priority=RequestPriority.HIGH,
+            priority=10,
         )
         req2 = InferenceRequest(
+            model="mock-model",
             prompt="What is dynamic batching?",
             max_tokens=32,
-            priority=RequestPriority.NORMAL,
+            priority=0,
         )
 
         # 3. Await asynchronous resolution
@@ -576,14 +557,14 @@ async def main() -> None:
             scheduler.submit(req2),
         )
 
-        print(f"Response 1: {resp1.text}")
-        print(f"Response 2: {resp2.text}")
+        print(f"Response 1: {resp1.generated_text}")
+        print(f"Response 2: {resp2.generated_text}")
 
         # 4. Inspect real-time telemetry snapshot
         snapshot = scheduler.collector.snapshot()
-        print(f"Total Completed: {snapshot.requests.completed_count}")
-        print(f"Mean Latency: {snapshot.requests.mean_latency_ms:.2f} ms")
-        print(f"Total Tokens/Sec: {snapshot.throughput.total_tokens_per_sec:.2f}")
+        print(f"Total Completed: {snapshot.requests.completed_requests}")
+        print(f"Mean Latency: {snapshot.requests.avg_total_latency_ms:.2f} ms")
+        print(f"Tokens/Sec: {snapshot.throughput.tokens_per_sec:.2f}")
 
 
 if __name__ == "__main__":
@@ -600,17 +581,17 @@ InferOpt includes a rich CLI for reproducible benchmarking and scientific valida
 # ==============================================================================
 # 1. Synthetic Workload Benchmark (Step 5)
 # ==============================================================================
-python -m inferopt.benchmarks --scenario light --backend mock
-python -m inferopt.benchmarks --scenario burst --num-requests 100 --backend mock
+python -m inferopt.benchmarks.cli --scenario light --backend mock
+python -m inferopt.benchmarks.cli --scenario burst --num-requests 100 --backend mock
 
 # ==============================================================================
 # 2. Apple Silicon MLX Controlled Validation (Step 8.5)
 # ==============================================================================
 # Single request controlled baseline comparison
-python -m inferopt.benchmarks --validate-mlx --scenario single --warmup 1 --repetitions 3
+python -m inferopt.benchmarks.cli --validate-mlx --scenario single --warmup 1 --repetitions 3
 
 # Full batching matrix on Metal GPU (4, 8, 16 concurrency x 1, 2, 4, 8 batch size)
-python -m inferopt.benchmarks --validate-mlx --batch-matrix
+python -m inferopt.benchmarks.cli --validate-mlx --batch-matrix
 
 # ==============================================================================
 # 3. NVIDIA GPU vLLM Scientific Validation (Step 10)
@@ -625,26 +606,26 @@ python -m inferopt.benchmarks.cli --validate-vllm \
 # ==============================================================================
 # 4. Dynamic Workload Transitions (Step 13)
 # ==============================================================================
-python -m inferopt.benchmarks.cli --step13-transitions --backend mock
+python -m inferopt.benchmarks.cli --experiment-step13 --backend mock
 
 # ==============================================================================
 # 5. SLA-Constrained Adaptive Control (Step 14)
 # ==============================================================================
-python -m inferopt.benchmarks.cli --step14-sla-adaptive --sla-p95 50.0 --backend mock
+python -m inferopt.benchmarks.cli --experiment-step14 --target-slo-p95-ms 50.0 --backend mock
 
 # ==============================================================================
 # 6. Heavy-Load Scalability & Saturation (Step 16)
 # ==============================================================================
-python -m inferopt.benchmarks.cli --step16-scalability \
-    --concurrency-levels 16 32 64 128 256 \
+python -m inferopt.benchmarks.cli --experiment-step16 \
+    --loads 16 32 64 128 256 \
     --model HuggingFaceTB/SmolLM2-1.7B-Instruct
 
 # ==============================================================================
 # 7. Long-Context & Production-Like Traffic (Step 17)
 # ==============================================================================
-python -m inferopt.benchmarks.cli --step17-long-context \
-    --traffic-patterns STEADY BURSTY MIXED LONG_CONTEXT_BURST \
-    --context-lengths SHORT MEDIUM LONG XLONG
+python -m inferopt.benchmarks.cli --experiment-step17 \
+    --traffic-profiles STEADY BURSTY MIXED LONG_CONTEXT_BURST \
+    --context-profiles SHORT MEDIUM LONG XLONG
 ```
 
 ---
