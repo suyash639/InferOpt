@@ -535,6 +535,327 @@ class TestDeltasAndReportFormatting:
         assert "Test Delta" in delta_table
 
 
+class TestScientificMetricsCorrectness:
+    """Comprehensive regression tests for scientific benchmark metric correctness."""
+
+    def test_latency_definitions_monotonicity_and_breakdown(self) -> None:
+        """Verify queue_wait_ms + execution_ms <= total_latency_ms."""
+        record = VLLMBenchmarkRequestRecord(
+            request_id="req-test-1",
+            prompt_hash="p" * 64,
+            output_hash="o" * 64,
+            input_tokens=15,
+            output_tokens=30,
+            latency_ms=125.5,
+            queue_wait_ms=25.0,
+            execution_ms=100.5,
+            success=True,
+        )
+        assert record.latency_ms >= record.execution_ms
+        assert round(record.queue_wait_ms + record.execution_ms, 2) == round(record.latency_ms, 2)
+
+    def test_percentile_and_mean_calculation_on_raw_individual_latencies(self) -> None:
+        """Verify mean and percentiles are computed over the same raw latency distribution."""
+        raw_latencies = [100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0]
+        mean_lat = sum(raw_latencies) / len(raw_latencies)
+        p50 = calculate_percentile(raw_latencies, 50.0)
+        p95 = calculate_percentile(raw_latencies, 95.0)
+        p99 = calculate_percentile(raw_latencies, 99.0)
+
+        assert mean_lat == 550.0
+        assert p50 == 550.0
+        assert p95 == 955.0
+        assert p99 == 991.0
+        assert min(raw_latencies) <= mean_lat <= max(raw_latencies)
+        assert p50 <= p95 <= p99
+
+    def test_delta_and_differential_overhead_exact_formula(self) -> None:
+        """Verify delta comparison strictly adheres to target.mean - baseline.mean."""
+        base_cond = VLLMConditionResult(
+            condition=VLLMCondition.DIRECT_VLLM,
+            condition_label="A. Direct vLLM",
+            concurrency=4,
+            max_batch_size=1,
+            total_requests=4,
+            completed_requests=4,
+            failed_requests=0,
+            duration_sec=3.739,
+            requests_per_sec=1.07,
+            output_tokens_per_sec=34.23,
+            total_tokens_per_sec=51.35,
+            mean_latency_ms=934.87,
+            median_latency_ms=930.0,
+            p50_latency_ms=930.0,
+            p95_latency_ms=945.0,
+            p99_latency_ms=950.0,
+            min_latency_ms=910.0,
+            max_latency_ms=950.0,
+            std_dev_latency_ms=15.0,
+            avg_queue_wait_ms=0.0,
+            avg_backend_execution_ms=934.87,
+            total_input_tokens=64,
+            total_output_tokens=128,
+            total_tokens=192,
+            avg_input_tokens_per_req=16.0,
+            avg_output_tokens_per_req=32.0,
+            min_output_tokens=32,
+            max_output_tokens=32,
+            total_batches=4,
+            avg_batch_size=1.0,
+            median_batch_size=1.0,
+            max_batch_size_formed=1,
+            avg_batch_formation_wait_ms=0.0,
+            avg_batch_execution_ms=934.87,
+            repetition_count=1,
+            requests=(),
+        )
+
+        target_cond = base_cond.model_copy(
+            update={
+                "condition": VLLMCondition.INFEROPT_BATCH_1,
+                "condition_label": "B. InferOpt Batch 1",
+                "max_batch_size": 1,
+                "mean_latency_ms": 944.87,  # Exactly +10.00 ms overhead
+                "requests_per_sec": 1.05,
+                "output_tokens_per_sec": 33.60,
+            }
+        )
+
+        deltas = compute_vllm_deltas([base_cond, target_cond])
+        assert len(deltas) == 1
+        d = deltas[0]
+        assert d.concurrency == 4
+        assert d.end_to_end_differential_overhead_ms == 10.0
+        expected_lat_change = round(((944.87 - 934.87) / 934.87) * 100.0, 2)
+        assert d.latency_change_pct == expected_lat_change
+
+    def test_concurrency_isolation_in_deltas(self) -> None:
+        """Verify delta calculation only compares conditions matching identical concurrency."""
+        base_c1 = VLLMConditionResult(
+            condition=VLLMCondition.DIRECT_VLLM,
+            condition_label="A. Direct vLLM c1",
+            concurrency=1,
+            max_batch_size=1,
+            total_requests=1,
+            completed_requests=1,
+            failed_requests=0,
+            duration_sec=1.0,
+            requests_per_sec=1.0,
+            output_tokens_per_sec=20.0,
+            total_tokens_per_sec=30.0,
+            mean_latency_ms=100.0,
+            median_latency_ms=100.0,
+            p50_latency_ms=100.0,
+            p95_latency_ms=100.0,
+            p99_latency_ms=100.0,
+            min_latency_ms=100.0,
+            max_latency_ms=100.0,
+            std_dev_latency_ms=0.0,
+            avg_queue_wait_ms=0.0,
+            avg_backend_execution_ms=100.0,
+            total_input_tokens=10,
+            total_output_tokens=20,
+            total_tokens=30,
+            avg_input_tokens_per_req=10.0,
+            avg_output_tokens_per_req=20.0,
+            min_output_tokens=20,
+            max_output_tokens=20,
+            total_batches=1,
+            avg_batch_size=1.0,
+            median_batch_size=1.0,
+            max_batch_size_formed=1,
+            avg_batch_formation_wait_ms=0.0,
+            avg_batch_execution_ms=100.0,
+            repetition_count=1,
+            requests=(),
+        )
+        target_c4 = base_c1.model_copy(
+            update={
+                "condition": VLLMCondition.INFEROPT_BATCH_4,
+                "condition_label": "D. InferOpt Batch 4 c4",
+                "concurrency": 4,
+                "max_batch_size": 4,
+            }
+        )
+
+        deltas = compute_vllm_deltas([base_c1, target_c4])
+        assert len(deltas) == 0
+
+
+class TestStrengthenedIntegrityGate:
+    """Rigorous unit tests for all integrity gate failure modes."""
+
+    def _create_valid_condition(self, scenario: Any) -> VLLMConditionResult:
+        req_records = tuple(
+            VLLMBenchmarkRequestRecord(
+                request_id=r.request_id,
+                prompt_hash=compute_sha256(r.prompt),
+                output_hash=compute_sha256(f"generated output for {r.request_id}"),
+                input_tokens=12,
+                output_tokens=24,
+                latency_ms=60.0,
+                queue_wait_ms=10.0,
+                execution_ms=50.0,
+                success=True,
+            )
+            for r in scenario.requests
+        )
+        return VLLMConditionResult(
+            condition=VLLMCondition.INFEROPT_BATCH_2,
+            condition_label="C. InferOpt Batch 2",
+            concurrency=2,
+            max_batch_size=2,
+            total_requests=len(scenario.requests),
+            completed_requests=len(scenario.requests),
+            failed_requests=0,
+            duration_sec=1.5,
+            requests_per_sec=2.67,
+            output_tokens_per_sec=64.0,
+            total_tokens_per_sec=96.0,
+            mean_latency_ms=60.0,
+            median_latency_ms=60.0,
+            p50_latency_ms=60.0,
+            p95_latency_ms=60.0,
+            p99_latency_ms=60.0,
+            min_latency_ms=60.0,
+            max_latency_ms=60.0,
+            std_dev_latency_ms=0.0,
+            avg_queue_wait_ms=10.0,
+            p50_queue_wait_ms=10.0,
+            p95_queue_wait_ms=10.0,
+            p99_queue_wait_ms=10.0,
+            avg_backend_execution_ms=50.0,
+            p50_backend_execution_ms=50.0,
+            p95_backend_execution_ms=50.0,
+            p99_backend_execution_ms=50.0,
+            total_input_tokens=48,
+            total_output_tokens=96,
+            total_tokens=144,
+            avg_input_tokens_per_req=12.0,
+            avg_output_tokens_per_req=24.0,
+            min_output_tokens=24,
+            max_output_tokens=24,
+            total_batches=2,
+            avg_batch_size=2.0,
+            median_batch_size=2.0,
+            min_batch_size=2,
+            max_batch_size_formed=2,
+            batch_size_distribution={2: 2},
+            avg_batch_formation_wait_ms=1.0,
+            avg_batch_execution_ms=50.0,
+            repetition_count=1,
+            requests=req_records,
+        )
+
+    def test_integrity_validates_clean_pass(self) -> None:
+        scenario = get_concurrent_4_workload(seed=42)
+        w_hash = compute_workload_hash(scenario)
+        cond = self._create_valid_condition(scenario)
+        res = validate_vllm_integrity(scenario, [cond], w_hash)
+        assert res.is_valid is True
+        assert len(res.diagnostic_messages) == 0
+
+    def test_integrity_detects_timestamp_inversion_negative(self) -> None:
+        scenario = get_concurrent_4_workload(seed=42)
+        w_hash = compute_workload_hash(scenario)
+        cond = self._create_valid_condition(scenario)
+
+        bad_reqs = list(cond.requests)
+        bad_reqs[0] = bad_reqs[0].model_copy(update={"execution_ms": -5.0})
+        bad_cond = cond.model_copy(update={"requests": tuple(bad_reqs)})
+
+        res = validate_vllm_integrity(scenario, [bad_cond], w_hash)
+        assert res.is_valid is False
+        assert res.has_timestamp_inversion is True
+        assert any("negative latency" in d.lower() for d in res.diagnostic_messages)
+
+    def test_integrity_detects_timestamp_turnaround_less_than_exec(self) -> None:
+        scenario = get_concurrent_4_workload(seed=42)
+        w_hash = compute_workload_hash(scenario)
+        cond = self._create_valid_condition(scenario)
+
+        bad_reqs = list(cond.requests)
+        bad_reqs[0] = bad_reqs[0].model_copy(update={"latency_ms": 30.0, "execution_ms": 50.0})
+        bad_cond = cond.model_copy(update={"requests": tuple(bad_reqs)})
+
+        res = validate_vllm_integrity(scenario, [bad_cond], w_hash)
+        assert res.is_valid is False
+        assert res.has_timestamp_inversion is True
+        assert any("turnaround latency" in d.lower() for d in res.diagnostic_messages)
+
+    def test_integrity_detects_batch_size_violation(self) -> None:
+        scenario = get_concurrent_4_workload(seed=42)
+        w_hash = compute_workload_hash(scenario)
+        cond = self._create_valid_condition(scenario)
+
+        bad_cond = cond.model_copy(update={"max_batch_size": 2, "max_batch_size_formed": 4})
+        res = validate_vllm_integrity(scenario, [bad_cond], w_hash)
+        assert res.is_valid is False
+        assert res.has_batch_size_violation is True
+        assert any("exceeding max_batch_size" in d.lower() for d in res.diagnostic_messages)
+
+    def test_integrity_detects_metric_percentile_inconsistency(self) -> None:
+        scenario = get_concurrent_4_workload(seed=42)
+        w_hash = compute_workload_hash(scenario)
+        cond = self._create_valid_condition(scenario)
+
+        bad_cond = cond.model_copy(update={"p50_latency_ms": 100.0, "p95_latency_ms": 50.0})
+        res = validate_vllm_integrity(scenario, [bad_cond], w_hash)
+        assert res.is_valid is False
+        assert res.has_metric_inconsistency is True
+        assert any("percentile ordering violated" in d.lower() for d in res.diagnostic_messages)
+
+    def test_integrity_detects_metric_bounds_inconsistency(self) -> None:
+        scenario = get_concurrent_4_workload(seed=42)
+        w_hash = compute_workload_hash(scenario)
+        cond = self._create_valid_condition(scenario)
+
+        bad_cond = cond.model_copy(update={"min_latency_ms": 100.0, "mean_latency_ms": 50.0})
+        res = validate_vllm_integrity(scenario, [bad_cond], w_hash)
+        assert res.is_valid is False
+        assert res.has_metric_inconsistency is True
+        assert any("bounds violated" in d.lower() for d in res.diagnostic_messages)
+
+    def test_integrity_detects_non_finite_metric(self) -> None:
+        scenario = get_concurrent_4_workload(seed=42)
+        w_hash = compute_workload_hash(scenario)
+        cond = self._create_valid_condition(scenario)
+
+        bad_cond = cond.model_copy(update={"requests_per_sec": float("nan")})
+        res = validate_vllm_integrity(scenario, [bad_cond], w_hash)
+        assert res.is_valid is False
+        assert res.has_metric_inconsistency is True
+        assert any("non-finite" in d.lower() for d in res.diagnostic_messages)
+
+    def test_integrity_detects_token_count_zero_or_negative(self) -> None:
+        scenario = get_concurrent_4_workload(seed=42)
+        w_hash = compute_workload_hash(scenario)
+        cond = self._create_valid_condition(scenario)
+
+        bad_reqs = list(cond.requests)
+        bad_reqs[0] = bad_reqs[0].model_copy(update={"output_tokens": 0})
+        bad_cond = cond.model_copy(update={"requests": tuple(bad_reqs)})
+
+        res = validate_vllm_integrity(scenario, [bad_cond], w_hash)
+        assert res.is_valid is False
+        assert res.has_invalid_tokens is True
+        assert any("invalid tokens" in d.lower() for d in res.diagnostic_messages)
+
+    def test_integrity_detects_phantom_request_ids(self) -> None:
+        scenario = get_concurrent_4_workload(seed=42)
+        w_hash = compute_workload_hash(scenario)
+        cond = self._create_valid_condition(scenario)
+
+        bad_reqs = list(cond.requests)
+        bad_reqs[0] = bad_reqs[0].model_copy(update={"request_id": "req-phantom-999"})
+        bad_cond = cond.model_copy(update={"requests": tuple(bad_reqs)})
+
+        res = validate_vllm_integrity(scenario, [bad_cond], w_hash)
+        assert res.is_valid is False
+        assert res.has_missing_ids is True
+        assert any("phantom" in d.lower() for d in res.diagnostic_messages)
+
+
 class TestDirectVLLMRunnerMocked:
     """Unit tests for DirectVLLMRunner using mock vLLM."""
 

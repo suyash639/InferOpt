@@ -21,7 +21,7 @@ from inferopt.backends.vllm import (
     VLLMConfig,
     cleanup_vllm_engine,
 )
-from inferopt.benchmarks.models import WorkloadRequestSpec, WorkloadScenario
+from inferopt.benchmarks.models import ArrivalPattern, WorkloadRequestSpec, WorkloadScenario
 from inferopt.core.exceptions import BackendError
 from inferopt.telemetry.collector import _compute_percentile
 
@@ -59,6 +59,8 @@ class DirectVLLMRequestResult(BaseModel):
     input_tokens: int = Field(default=0, ge=0, description="Exact prompt token count")
     output_tokens: int = Field(default=0, ge=0, description="Exact generated token count")
     latency_ms: float = Field(default=0.0, ge=0.0, description="Turnaround execution latency in ms")
+    queue_wait_ms: float = Field(default=0.0, ge=0.0, description="Queue wait duration in ms")
+    execution_ms: float = Field(default=0.0, ge=0.0, description="Backend execution duration in ms")
     success: bool = Field(default=True, description="True if generation succeeded")
     error_message: str | None = Field(default=None, description="Error message if failed")
 
@@ -100,6 +102,12 @@ class DirectVLLMResult(BaseModel):
     max_latency_ms: float = Field(default=0.0, ge=0.0, description="Maximum request latency in ms")
     std_dev_latency_ms: float = Field(
         default=0.0, ge=0.0, description="Standard deviation of request latencies in ms"
+    )
+    avg_queue_wait_ms: float = Field(
+        default=0.0, ge=0.0, description="Average queue wait time in ms"
+    )
+    avg_backend_execution_ms: float = Field(
+        default=0.0, ge=0.0, description="Average backend execution time in ms"
     )
     request_results: tuple[DirectVLLMRequestResult, ...] = Field(
         default_factory=tuple, description="Ordered per-request results"
@@ -338,28 +346,38 @@ class DirectVLLMRunner:
 
         await loop.run_in_executor(self._executor, _warmup_sync)
 
-    async def execute_request(self, spec: WorkloadRequestSpec) -> DirectVLLMRequestResult:
+    async def execute_request(
+        self,
+        spec: WorkloadRequestSpec,
+        submission_time: float | None = None,
+    ) -> DirectVLLMRequestResult:
         """Execute a single request directly against vLLM.
 
         Args:
             spec: Workload request specification.
+            submission_time: High-resolution submission timestamp (perf_counter).
+                             If None, measured at start of this method call.
 
         Returns:
-            DirectVLLMRequestResult with exact token counts, output hashes, and latency.
+            DirectVLLMRequestResult with exact token counts, output hashes, and latency metrics.
         """
+        t_submit = submission_time if submission_time is not None else time.perf_counter()
         prompt_hash = compute_sha256(spec.prompt)
         temp = spec.temperature if spec.temperature >= 0.0 else self._config.default_temperature
         max_tok = spec.max_tokens if spec.max_tokens > 0 else self._config.default_max_tokens
 
-        def _sync_gen() -> tuple[str, int, int, float]:
-            t0 = time.perf_counter()
+        def _sync_gen() -> tuple[str, int, int, float, float, float]:
+            t_dispatch = time.perf_counter()
             sampling_params = self._build_sampling_params(temperature=temp, max_tokens=max_tok)
             outputs = self._llm.generate(
                 prompts=[spec.prompt],
                 sampling_params=sampling_params,
                 use_tqdm=False,
             )
-            lat_ms = max(0.0, (time.perf_counter() - t0) * 1000.0)
+            t_complete = time.perf_counter()
+            exec_ms = max(0.0, (t_complete - t_dispatch) * 1000.0)
+            q_wait_ms = max(0.0, (t_dispatch - t_submit) * 1000.0)
+            turnaround_ms = max(0.0, (t_complete - t_submit) * 1000.0)
 
             if not outputs:
                 raise RuntimeError(f"vLLM returned empty outputs for request {spec.request_id}")
@@ -371,13 +389,13 @@ class DirectVLLMRunner:
             out_tokens = (
                 len(first_comp.token_ids) if first_comp and first_comp.token_ids is not None else 0
             )
-            return gen_text, in_tokens, out_tokens, lat_ms
+            return gen_text, in_tokens, out_tokens, turnaround_ms, q_wait_ms, exec_ms
 
         try:
             loop = asyncio.get_running_loop()
             assert self._executor is not None
-            gen_text, in_tokens, out_tokens, lat_ms = await loop.run_in_executor(
-                self._executor, _sync_gen
+            gen_text, in_tokens, out_tokens, turnaround_ms, q_wait_ms, exec_ms = (
+                await loop.run_in_executor(self._executor, _sync_gen)
             )
             out_hash = compute_sha256(gen_text)
             return DirectVLLMRequestResult(
@@ -388,11 +406,14 @@ class DirectVLLMRunner:
                 output_hash=out_hash,
                 input_tokens=in_tokens,
                 output_tokens=out_tokens,
-                latency_ms=lat_ms,
+                latency_ms=turnaround_ms,
+                queue_wait_ms=q_wait_ms,
+                execution_ms=exec_ms,
                 success=True,
                 error_message=None,
             )
         except Exception as exc:
+            t_err = time.perf_counter()
             return DirectVLLMRequestResult(
                 request_id=spec.request_id,
                 prompt=spec.prompt,
@@ -401,7 +422,9 @@ class DirectVLLMRunner:
                 output_hash="",
                 input_tokens=0,
                 output_tokens=0,
-                latency_ms=0.0,
+                latency_ms=max(0.0, (t_err - t_submit) * 1000.0),
+                queue_wait_ms=0.0,
+                execution_ms=0.0,
                 success=False,
                 error_message=str(exc),
             )
@@ -441,12 +464,64 @@ class DirectVLLMRunner:
         sem = asyncio.Semaphore(max(1, concurrency))
 
         async def _bounded_submit(spec: WorkloadRequestSpec) -> DirectVLLMRequestResult:
+            t_sub = time.perf_counter()
             async with sem:
-                return await self.execute_request(spec)
+                return await self.execute_request(spec, submission_time=t_sub)
 
+        pattern = scenario.config.arrival_pattern
         t_start = time.perf_counter()
-        tasks = [_bounded_submit(spec) for spec in scenario.requests]
-        results_list = await asyncio.gather(*tasks)
+
+        if pattern == ArrivalPattern.SEQUENTIAL:
+            results_list: list[DirectVLLMRequestResult] = []
+            for spec in scenario.requests:
+                results_list.append(await _bounded_submit(spec))
+        elif pattern == ArrivalPattern.BURST:
+            barrier = asyncio.Event()
+            ready_count = 0
+            ready_lock = asyncio.Lock()
+            all_ready = asyncio.Event()
+
+            async def _burst_submit(spec: WorkloadRequestSpec) -> DirectVLLMRequestResult:
+                nonlocal ready_count
+                async with ready_lock:
+                    ready_count += 1
+                    if ready_count == len(scenario.requests):
+                        all_ready.set()
+                await barrier.wait()
+                return await _bounded_submit(spec)
+
+            burst_tasks = [
+                asyncio.create_task(_burst_submit(spec)) for spec in scenario.requests
+            ]
+            await all_ready.wait()
+            barrier.set()
+            res_raw = await asyncio.gather(*burst_tasks)
+            results_list = list(res_raw)
+        elif pattern == ArrivalPattern.FIXED_RATE:
+            rate_rps = scenario.config.arrival_rate_rps or 10.0
+            start_bm = time.perf_counter()
+
+            async def _rate_submit(
+                spec: WorkloadRequestSpec, target_offset: float
+            ) -> DirectVLLMRequestResult:
+                elapsed = time.perf_counter() - start_bm
+                rem = target_offset - elapsed
+                if rem > 0:
+                    await asyncio.sleep(rem)
+                return await _bounded_submit(spec)
+
+            interval = 1.0 / rate_rps
+            rate_coros = [
+                _rate_submit(spec, idx * interval)
+                for idx, spec in enumerate(scenario.requests)
+            ]
+            res_raw = await asyncio.gather(*rate_coros)
+            results_list = list(res_raw)
+        else:
+            concurrent_coros = [_bounded_submit(spec) for spec in scenario.requests]
+            res_raw = await asyncio.gather(*concurrent_coros)
+            results_list = list(res_raw)
+
         duration_sec = max(0.0001, time.perf_counter() - t_start)
 
         completed_results = [r for r in results_list if r.success]
@@ -454,6 +529,8 @@ class DirectVLLMRunner:
         completed_count = len(completed_results)
 
         latencies = [r.latency_ms for r in completed_results]
+        q_waits = [r.queue_wait_ms for r in completed_results]
+        backend_execs = [r.execution_ms for r in completed_results]
         in_tokens = [r.input_tokens for r in completed_results]
         out_tokens = [r.output_tokens for r in completed_results]
 
@@ -474,6 +551,9 @@ class DirectVLLMRunner:
         min_lat = min(latencies, default=0.0)
         max_lat = max(latencies, default=0.0)
         std_dev_lat = compute_std_dev(latencies, avg_lat) if len(latencies) > 1 else 0.0
+
+        avg_q_wait = (sum(q_waits) / completed_count) if completed_count > 0 else 0.0
+        avg_backend_exec = (sum(backend_execs) / completed_count) if completed_count > 0 else 0.0
 
         return DirectVLLMResult(
             baseline_id=f"direct-vllm-{uuid.uuid4().hex[:8]}",
@@ -499,6 +579,8 @@ class DirectVLLMRunner:
             min_latency_ms=min_lat,
             max_latency_ms=max_lat,
             std_dev_latency_ms=std_dev_lat,
+            avg_queue_wait_ms=avg_q_wait,
+            avg_backend_execution_ms=avg_backend_exec,
             request_results=tuple(results_list),
             warmup_count=warmup_count,
             model_load_time_ms=self.model_load_time_ms,

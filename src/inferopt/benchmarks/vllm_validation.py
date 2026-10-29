@@ -7,6 +7,7 @@ overhead analysis, and objective findings classification (PROVEN / SUGGESTED / N
 """
 
 import hashlib
+import math
 import os
 import platform
 import subprocess
@@ -105,6 +106,8 @@ class VLLMBenchmarkRequestRecord(BaseModel):
     input_tokens: int = Field(ge=0, description="Exact prompt token count")
     output_tokens: int = Field(ge=0, description="Exact generated token count")
     latency_ms: float = Field(ge=0.0, description="Turnaround execution latency in ms")
+    queue_wait_ms: float = Field(default=0.0, ge=0.0, description="Queue wait duration in ms")
+    execution_ms: float = Field(default=0.0, ge=0.0, description="Backend execution duration in ms")
     success: bool = Field(description="True if generation succeeded")
 
 
@@ -272,6 +275,18 @@ class VLLMIntegrityResult(BaseModel):
     has_workload_hash_mismatch: bool = Field(
         default=False, description="True if conditions received different workloads"
     )
+    has_timestamp_inversion: bool = Field(
+        default=False,
+        description="True if timestamp or duration monotonicity was violated",
+    )
+    has_batch_size_violation: bool = Field(
+        default=False,
+        description="True if formed batch exceeded configured max_batch_size",
+    )
+    has_metric_inconsistency: bool = Field(
+        default=False,
+        description="True if percentiles, totals, or bounds are mathematically inconsistent",
+    )
     diagnostic_messages: tuple[str, ...] = Field(
         default_factory=tuple, description="Detailed diagnostic reasons for failures"
     )
@@ -420,17 +435,29 @@ def validate_vllm_integrity(
     condition_results: Sequence[VLLMConditionResult],
     expected_workload_hash: str,
 ) -> VLLMIntegrityResult:
-    """Validate 100% request completion, token validity, and identical workload execution."""
+    """Validate 100% request completion, token validity, timestamp and metric consistency."""
     diagnostics: list[str] = []
     total_expected = len(scenario.requests)
     expected_req_ids = [r.request_id for r in scenario.requests]
+    expected_hash_calc = compute_workload_hash(scenario)
 
     has_duplicate = False
     has_missing = False
     has_empty = False
     has_invalid_tokens = False
     has_unexpected_failures = False
+    has_workload_hash_mismatch = False
+    has_timestamp_inversion = False
+    has_batch_size_violation = False
+    has_metric_inconsistency = False
     total_completed = 0
+
+    if expected_workload_hash != expected_hash_calc:
+        has_workload_hash_mismatch = True
+        diagnostics.append(
+            f"Workload hash mismatch: expected '{expected_workload_hash}', "
+            f"calculated from scenario '{expected_hash_calc}'."
+        )
 
     if not condition_results:
         return VLLMIntegrityResult(
@@ -442,11 +469,23 @@ def validate_vllm_integrity(
             has_empty_outputs=False,
             has_invalid_tokens=False,
             has_unexpected_failures=True,
-            has_workload_hash_mismatch=False,
+            has_workload_hash_mismatch=has_workload_hash_mismatch,
+            has_timestamp_inversion=False,
+            has_batch_size_violation=False,
+            has_metric_inconsistency=False,
             diagnostic_messages=("No condition results produced to validate.",),
         )
 
+    expected_prompt_hashes = {r.request_id: compute_sha256(r.prompt) for r in scenario.requests}
+
     for cond in condition_results:
+        if cond.total_requests != (cond.completed_requests + cond.failed_requests):
+            has_metric_inconsistency = True
+            diagnostics.append(
+                f"Condition {cond.condition_label}: total_requests ({cond.total_requests}) != "
+                f"completed ({cond.completed_requests}) + failed ({cond.failed_requests})."
+            )
+
         if cond.failed_requests > 0:
             has_unexpected_failures = True
             diagnostics.append(
@@ -472,6 +511,13 @@ def validate_vllm_integrity(
                 f"Condition {cond.condition_label} missing request IDs: {sorted(missing_ids)}."
             )
 
+        phantom_ids = set(req_ids) - set(expected_req_ids)
+        if phantom_ids:
+            has_missing = True
+            diagnostics.append(
+                f"Condition {cond.condition_label} unexpected phantom IDs: {sorted(phantom_ids)}."
+            )
+
         for req in cond.requests:
             if not req.success:
                 has_unexpected_failures = True
@@ -487,6 +533,96 @@ def validate_vllm_integrity(
                     f"invalid tokens (in={req.input_tokens}, out={req.output_tokens})."
                 )
 
+            expected_p_hash = expected_prompt_hashes.get(req.request_id)
+            if (
+                expected_p_hash
+                and req.prompt_hash
+                and len(req.prompt_hash) == 64
+                and len(expected_p_hash) == 64
+                and req.prompt_hash != expected_p_hash
+            ):
+                has_workload_hash_mismatch = True
+                diagnostics.append(
+                    f"Condition {cond.condition_label} request {req.request_id} prompt hash "
+                    f"mismatches scenario specification."
+                )
+
+            if req.queue_wait_ms < 0.0 or req.execution_ms < 0.0 or req.latency_ms < 0.0:
+                has_timestamp_inversion = True
+                diagnostics.append(
+                    f"Condition {cond.condition_label} req {req.request_id} has negative latency "
+                    f"(turnaround={req.latency_ms:.1f}ms, "
+                    f"q_wait={req.queue_wait_ms:.1f}ms, "
+                    f"exec={req.execution_ms:.1f}ms)."
+                )
+
+            if req.latency_ms < (req.execution_ms - 0.05):
+                has_timestamp_inversion = True
+                diagnostics.append(
+                    f"Condition {cond.condition_label} req {req.request_id} turnaround latency "
+                    f"({req.latency_ms:.1f}ms) < backend execution ({req.execution_ms:.1f}ms)."
+                )
+
+        if cond.max_batch_size_formed > cond.max_batch_size:
+            has_batch_size_violation = True
+            diagnostics.append(
+                f"Condition {cond.condition_label} formed batch {cond.max_batch_size_formed}, "
+                f"exceeding max_batch_size={cond.max_batch_size}."
+            )
+
+        for b_sz in cond.batch_size_distribution:
+            if b_sz > cond.max_batch_size:
+                has_batch_size_violation = True
+                diagnostics.append(
+                    f"Condition {cond.condition_label} batch size {b_sz} "
+                    f"exceeds max_batch_size={cond.max_batch_size}."
+                )
+
+        if cond.duration_sec <= 0.0:
+            has_timestamp_inversion = True
+            diagnostics.append(
+                f"Condition {cond.condition_label} non-positive duration_sec={cond.duration_sec}."
+            )
+
+        finite_checks = (
+            ("requests_per_sec", cond.requests_per_sec),
+            ("output_tokens_per_sec", cond.output_tokens_per_sec),
+            ("mean_latency_ms", cond.mean_latency_ms),
+            ("p50_latency_ms", cond.p50_latency_ms),
+            ("p95_latency_ms", cond.p95_latency_ms),
+            ("p99_latency_ms", cond.p99_latency_ms),
+            ("min_latency_ms", cond.min_latency_ms),
+            ("max_latency_ms", cond.max_latency_ms),
+        )
+        for name, val in finite_checks:
+            if not math.isfinite(val):
+                has_metric_inconsistency = True
+                diagnostics.append(
+                    f"Condition {cond.condition_label} metric '{name}' is non-finite ({val})."
+                )
+
+        if cond.requests and len(cond.requests) > 0:
+            bounds_ok = (
+                cond.min_latency_ms <= cond.mean_latency_ms + 1e-4 <= cond.max_latency_ms + 2e-4
+            )
+            if not bounds_ok:
+                has_metric_inconsistency = True
+                diagnostics.append(
+                    f"Condition {cond.condition_label} bounds violated: min "
+                    f"({cond.min_latency_ms:.2f}) <= mean ({cond.mean_latency_ms:.2f}) "
+                    f"<= max ({cond.max_latency_ms:.2f})."
+                )
+            percentiles_ok = (
+                cond.p50_latency_ms <= cond.p95_latency_ms + 1e-4 <= cond.p99_latency_ms + 2e-4
+            )
+            if not percentiles_ok:
+                has_metric_inconsistency = True
+                diagnostics.append(
+                    f"Condition {cond.condition_label} percentile ordering violated: "
+                    f"p50 ({cond.p50_latency_ms:.2f}) <= p95 ({cond.p95_latency_ms:.2f}) "
+                    f"<= p99 ({cond.p99_latency_ms:.2f})."
+                )
+
         total_completed = max(total_completed, cond.completed_requests)
 
     is_valid = (
@@ -495,6 +631,10 @@ def validate_vllm_integrity(
         and not has_empty
         and not has_invalid_tokens
         and not has_unexpected_failures
+        and not has_workload_hash_mismatch
+        and not has_timestamp_inversion
+        and not has_batch_size_violation
+        and not has_metric_inconsistency
     )
 
     return VLLMIntegrityResult(
@@ -506,7 +646,10 @@ def validate_vllm_integrity(
         has_empty_outputs=has_empty,
         has_invalid_tokens=has_invalid_tokens,
         has_unexpected_failures=has_unexpected_failures,
-        has_workload_hash_mismatch=False,
+        has_workload_hash_mismatch=has_workload_hash_mismatch,
+        has_timestamp_inversion=has_timestamp_inversion,
+        has_batch_size_violation=has_batch_size_violation,
+        has_metric_inconsistency=has_metric_inconsistency,
         diagnostic_messages=tuple(diagnostics),
     )
 
@@ -617,7 +760,7 @@ def format_vllm_performance_table(
         return f"No results for concurrency {concurrency}"
 
     header = (
-        f"{'Condition':<28} {'Req/s':>8} {'Tok/s':>9} "
+        f"{'Condition':<28} {'Req/s':>8} {'Tok/s':>9} {'Mean (ms)':>10} "
         f"{'p50 (ms)':>9} {'p95 (ms)':>9} {'p99 (ms)':>9}"
     )
     lines: list[str] = [
@@ -628,8 +771,8 @@ def format_vllm_performance_table(
     for c in matched:
         lines.append(
             f"{c.condition_label:<28} {c.requests_per_sec:>8.2f} "
-            f"{c.output_tokens_per_sec:>9.2f} {c.p50_latency_ms:>9.2f} "
-            f"{c.p95_latency_ms:>9.2f} {c.p99_latency_ms:>9.2f}"
+            f"{c.output_tokens_per_sec:>9.2f} {c.mean_latency_ms:>10.2f} "
+            f"{c.p50_latency_ms:>9.2f} {c.p95_latency_ms:>9.2f} {c.p99_latency_ms:>9.2f}"
         )
     return "\n".join(lines)
 
@@ -648,7 +791,7 @@ def format_vllm_batch_table(
         f"{'Max Size':>9} {'Wait (ms)':>10} {'Exec (ms)':>10}"
     )
     lines: list[str] = [
-        "Batch Statistics:",
+        "Batch Statistics (Wait = formation wait, Exec = backend batch execution):",
         header,
         "-" * len(header),
     ]
@@ -850,17 +993,26 @@ class VLLMValidator:
             durations = [r.duration_sec for r in rep_results]
             rpss = [r.requests_per_sec for r in rep_results]
             tok_pss = [r.output_tokens_per_sec for r in rep_results]
-            mean_lats = [r.avg_latency_ms for r in rep_results]
 
             # Pool all individual request latencies from all repetitions
             all_lats: list[float] = []
+            all_q_waits: list[float] = []
+            all_backend_execs: list[float] = []
             for r in rep_results:
                 all_lats.extend([req.latency_ms for req in r.request_results if req.success])
+                all_q_waits.extend([req.queue_wait_ms for req in r.request_results if req.success])
+                all_backend_execs.extend(
+                    [req.execution_ms for req in r.request_results if req.success]
+                )
 
             avg_dur = sum(durations) / len(durations) if durations else 0.0
             avg_rps = sum(rpss) / len(rpss) if rpss else 0.0
             avg_tok_ps = sum(tok_pss) / len(tok_pss) if tok_pss else 0.0
-            avg_mean_lat = sum(mean_lats) / len(mean_lats) if mean_lats else 0.0
+            avg_mean_lat = sum(all_lats) / len(all_lats) if all_lats else 0.0
+            avg_q_wait = sum(all_q_waits) / len(all_q_waits) if all_q_waits else 0.0
+            avg_backend_exec = (
+                sum(all_backend_execs) / len(all_backend_execs) if all_backend_execs else 0.0
+            )
 
             p50_lat = calculate_percentile(all_lats, 50.0) if all_lats else 0.0
             p95_lat = calculate_percentile(all_lats, 95.0) if all_lats else 0.0
@@ -868,6 +1020,20 @@ class VLLMValidator:
             min_lat = min(all_lats, default=0.0)
             max_lat = max(all_lats, default=0.0)
             std_dev_lat = compute_std_dev(all_lats, avg_mean_lat) if len(all_lats) > 1 else 0.0
+
+            p50_q_wait = calculate_percentile(all_q_waits, 50.0) if all_q_waits else 0.0
+            p95_q_wait = calculate_percentile(all_q_waits, 95.0) if all_q_waits else 0.0
+            p99_q_wait = calculate_percentile(all_q_waits, 99.0) if all_q_waits else 0.0
+
+            p50_backend_exec = (
+                calculate_percentile(all_backend_execs, 50.0) if all_backend_execs else 0.0
+            )
+            p95_backend_exec = (
+                calculate_percentile(all_backend_execs, 95.0) if all_backend_execs else 0.0
+            )
+            p99_backend_exec = (
+                calculate_percentile(all_backend_execs, 99.0) if all_backend_execs else 0.0
+            )
 
             # Extract tokens from final repetition
             final_rep = rep_results[-1]
@@ -879,6 +1045,8 @@ class VLLMValidator:
                     input_tokens=r.input_tokens,
                     output_tokens=r.output_tokens,
                     latency_ms=r.latency_ms,
+                    queue_wait_ms=r.queue_wait_ms,
+                    execution_ms=r.execution_ms,
                     success=r.success,
                 )
                 for r in final_rep.request_results
@@ -891,6 +1059,8 @@ class VLLMValidator:
             rep_measurements: list[VLLMRepetitionMeasurement] = []
             for rep_idx, r in enumerate(rep_results):
                 r_lats = [req.latency_ms for req in r.request_results if req.success]
+                r_waits = [req.queue_wait_ms for req in r.request_results if req.success]
+                r_execs = [req.execution_ms for req in r.request_results if req.success]
                 r_p50 = calculate_percentile(r_lats, 50.0) if r_lats else 0.0
                 r_p95 = calculate_percentile(r_lats, 95.0) if r_lats else 0.0
                 r_p99 = calculate_percentile(r_lats, 99.0) if r_lats else 0.0
@@ -914,8 +1084,8 @@ class VLLMValidator:
                         p99_latency_ms=r_p99,
                         min_latency_ms=min(r_lats, default=0.0),
                         max_latency_ms=max(r_lats, default=0.0),
-                        avg_queue_wait_ms=0.0,
-                        avg_backend_execution_ms=r.avg_latency_ms,
+                        avg_queue_wait_ms=(sum(r_waits) / len(r_waits)) if r_waits else 0.0,
+                        avg_backend_execution_ms=(sum(r_execs) / len(r_execs)) if r_execs else 0.0,
                         total_batches=len(r.request_results),
                         avg_batch_size=1.0,
                         completed_requests=r_comp,
@@ -945,14 +1115,14 @@ class VLLMValidator:
                 min_latency_ms=min_lat,
                 max_latency_ms=max_lat,
                 std_dev_latency_ms=std_dev_lat,
-                avg_queue_wait_ms=0.0,
-                p50_queue_wait_ms=0.0,
-                p95_queue_wait_ms=0.0,
-                p99_queue_wait_ms=0.0,
-                avg_backend_execution_ms=avg_mean_lat,
-                p50_backend_execution_ms=p50_lat,
-                p95_backend_execution_ms=p95_lat,
-                p99_backend_execution_ms=p99_lat,
+                avg_queue_wait_ms=avg_q_wait,
+                p50_queue_wait_ms=p50_q_wait,
+                p95_queue_wait_ms=p95_q_wait,
+                p99_queue_wait_ms=p99_q_wait,
+                avg_backend_execution_ms=avg_backend_exec,
+                p50_backend_execution_ms=p50_backend_exec,
+                p95_backend_execution_ms=p95_backend_exec,
+                p99_backend_execution_ms=p99_backend_exec,
                 total_input_tokens=total_in,
                 total_output_tokens=total_out,
                 total_tokens=total_in + total_out,
@@ -971,7 +1141,7 @@ class VLLMValidator:
                 max_batch_size_formed=1,
                 batch_size_distribution={1: comp_count},
                 avg_batch_formation_wait_ms=0.0,
-                avg_batch_execution_ms=avg_mean_lat,
+                avg_batch_execution_ms=avg_backend_exec,
                 repetition_count=repetitions,
                 requests=req_records,
                 repetition_measurements=tuple(rep_measurements),
@@ -1091,18 +1261,29 @@ class VLLMValidator:
             durations = [r.duration_sec for r in rep_results_raw]
             rpss = [r.requests_per_sec for r in rep_results_raw]
             tok_pss = [r.tokens_per_sec for r in rep_results_raw]
-            mean_lats = [s.requests.avg_total_latency_ms for s in rep_snapshots]
 
-            # Pool all individual request latencies across all repetitions (warmup excluded)
+            # Pool individual request latencies across all repetitions (warmup excluded)
             all_lats: list[float] = []
-            for res in rep_results_raw:
-                for resp in res.responses:
-                    all_lats.append(resp.latency_ms)
+            all_q_waits: list[float] = []
+            all_backend_execs: list[float] = []
+
+            for r_raw, snap in zip(rep_results_raw, rep_snapshots, strict=False):
+                if hasattr(r_raw, "request_metrics") and r_raw.request_metrics:
+                    for m in r_raw.request_metrics:
+                        if getattr(m.status, "name", str(m.status)) == "COMPLETED":
+                            all_lats.append(m.total_latency_ms)
+                            all_q_waits.append(m.queue_wait_ms)
+                            all_backend_execs.append(m.execution_ms)
+                else:
+                    for resp in r_raw.responses:
+                        all_lats.append(resp.latency_ms)
+                        all_backend_execs.append(resp.latency_ms)
+                    all_q_waits.append(snap.requests.avg_queue_wait_ms)
 
             avg_dur = sum(durations) / len(durations) if durations else 0.0
             avg_rps = sum(rpss) / len(rpss) if rpss else 0.0
             avg_tok_ps = sum(tok_pss) / len(tok_pss) if tok_pss else 0.0
-            avg_mean_lat = sum(mean_lats) / len(mean_lats) if mean_lats else 0.0
+            avg_mean_lat = sum(all_lats) / len(all_lats) if all_lats else 0.0
 
             p50_lat = calculate_percentile(all_lats, 50.0) if all_lats else 0.0
             p95_lat = calculate_percentile(all_lats, 95.0) if all_lats else 0.0
@@ -1111,32 +1292,59 @@ class VLLMValidator:
             max_lat = max(all_lats, default=0.0)
             std_dev_lat = compute_std_dev(all_lats, avg_mean_lat) if len(all_lats) > 1 else 0.0
 
-            avg_q_wait = (
-                sum(s.requests.avg_queue_wait_ms for s in rep_snapshots) / len(rep_snapshots)
-                if rep_snapshots
-                else 0.0
-            )
+            avg_q_wait = sum(all_q_waits) / len(all_q_waits) if all_q_waits else 0.0
+            p50_q_wait = calculate_percentile(all_q_waits, 50.0) if all_q_waits else 0.0
+            p95_q_wait = calculate_percentile(all_q_waits, 95.0) if all_q_waits else 0.0
+            p99_q_wait = calculate_percentile(all_q_waits, 99.0) if all_q_waits else 0.0
+
             avg_backend_exec = (
-                sum(s.requests.avg_execution_ms for s in rep_snapshots) / len(rep_snapshots)
-                if rep_snapshots
-                else 0.0
+                sum(all_backend_execs) / len(all_backend_execs) if all_backend_execs else 0.0
+            )
+            p50_backend_exec = (
+                calculate_percentile(all_backend_execs, 50.0) if all_backend_execs else 0.0
+            )
+            p95_backend_exec = (
+                calculate_percentile(all_backend_execs, 95.0) if all_backend_execs else 0.0
+            )
+            p99_backend_exec = (
+                calculate_percentile(all_backend_execs, 99.0) if all_backend_execs else 0.0
             )
 
             final_snap = rep_snapshots[-1]
             req_stats = final_snap.requests
-            batch_stats = final_snap.batches
             tp_stats = final_snap.throughput
 
             # Canonical request records from final run
             final_res = rep_results_raw[-1]
+            metrics_by_id = {}
+            if hasattr(final_res, "request_metrics") and final_res.request_metrics:
+                metrics_by_id = {m.request_id: m for m in final_res.request_metrics}
+            scenario_prompt_map = {spec.request_id: spec.prompt for spec in scenario.requests}
+
             req_records = tuple(
                 VLLMBenchmarkRequestRecord(
                     request_id=r.request_id,
-                    prompt_hash=compute_sha256(r.metadata.get("prompt", "")),
+                    prompt_hash=compute_sha256(
+                        scenario_prompt_map.get(r.request_id, r.metadata.get("prompt", ""))
+                    ),
                     output_hash=compute_sha256(r.generated_text),
                     input_tokens=r.input_tokens or 0,
                     output_tokens=r.output_tokens or 0,
-                    latency_ms=r.latency_ms,
+                    latency_ms=(
+                        metrics_by_id[r.request_id].total_latency_ms
+                        if r.request_id in metrics_by_id
+                        else r.latency_ms
+                    ),
+                    queue_wait_ms=(
+                        metrics_by_id[r.request_id].queue_wait_ms
+                        if r.request_id in metrics_by_id
+                        else 0.0
+                    ),
+                    execution_ms=(
+                        metrics_by_id[r.request_id].execution_ms
+                        if r.request_id in metrics_by_id
+                        else r.latency_ms
+                    ),
                     success=True,
                 )
                 for r in final_res.responses
@@ -1153,19 +1361,68 @@ class VLLMValidator:
             min_out = min(out_tokens_list, default=0)
             max_out = max(out_tokens_list, default=0)
 
+            avg_batch_size = (
+                sum(s.batches.avg_batch_size for s in rep_snapshots) / len(rep_snapshots)
+                if rep_snapshots
+                else 0.0
+            )
+            avg_batch_wait = (
+                sum(s.batches.avg_batch_formation_wait_ms for s in rep_snapshots)
+                / len(rep_snapshots)
+                if rep_snapshots
+                else 0.0
+            )
+            avg_batch_exec = (
+                sum(s.batches.avg_batch_execution_ms for s in rep_snapshots) / len(rep_snapshots)
+                if rep_snapshots
+                else 0.0
+            )
+            max_batch_size_formed = max(
+                (s.batches.max_batch_size for s in rep_snapshots), default=0
+            )
+            min_batch_size_formed = min(
+                (s.batches.min_batch_size for s in rep_snapshots), default=0
+            )
+            avg_total_batches = (
+                round(sum(s.batches.total_batches for s in rep_snapshots) / len(rep_snapshots))
+                if rep_snapshots
+                else 0
+            )
+
             batch_size_dist: dict[int, int] = {}
-            if batch_stats.total_batches > 0:
-                eff_size = max(1, round(batch_stats.avg_batch_size))
-                batch_size_dist = {eff_size: batch_stats.total_batches}
+            if avg_total_batches > 0:
+                eff_size = max(1, round(avg_batch_size))
+                batch_size_dist = {eff_size: avg_total_batches}
 
             rep_measurements: list[VLLMRepetitionMeasurement] = []
             for rep_idx, (r_raw, snap) in enumerate(
                 zip(rep_results_raw, rep_snapshots, strict=False)
             ):
-                r_lats = [resp.latency_ms for resp in r_raw.responses]
+                if hasattr(r_raw, "request_metrics") and r_raw.request_metrics:
+                    r_lats = [
+                        m.total_latency_ms
+                        for m in r_raw.request_metrics
+                        if getattr(m.status, "name", str(m.status)) == "COMPLETED"
+                    ]
+                    r_waits = [
+                        m.queue_wait_ms
+                        for m in r_raw.request_metrics
+                        if getattr(m.status, "name", str(m.status)) == "COMPLETED"
+                    ]
+                    r_execs = [
+                        m.execution_ms
+                        for m in r_raw.request_metrics
+                        if getattr(m.status, "name", str(m.status)) == "COMPLETED"
+                    ]
+                else:
+                    r_lats = [resp.latency_ms for resp in r_raw.responses]
+                    r_waits = [snap.requests.avg_queue_wait_ms] * len(r_lats)
+                    r_execs = [resp.latency_ms for resp in r_raw.responses]
+
                 r_p50 = calculate_percentile(r_lats, 50.0) if r_lats else 0.0
                 r_p95 = calculate_percentile(r_lats, 95.0) if r_lats else 0.0
                 r_p99 = calculate_percentile(r_lats, 99.0) if r_lats else 0.0
+                r_mean = (sum(r_lats) / len(r_lats)) if r_lats else 0.0
                 r_tot_tok = snap.throughput.total_input_tokens + snap.throughput.total_output_tokens
                 rep_measurements.append(
                     VLLMRepetitionMeasurement(
@@ -1178,14 +1435,14 @@ class VLLMValidator:
                         total_tokens_per_sec=(
                             r_tot_tok / r_raw.duration_sec if r_raw.duration_sec > 0 else 0.0
                         ),
-                        mean_latency_ms=snap.requests.avg_total_latency_ms,
+                        mean_latency_ms=r_mean,
                         p50_latency_ms=r_p50,
                         p95_latency_ms=r_p95,
                         p99_latency_ms=r_p99,
                         min_latency_ms=min(r_lats, default=0.0),
                         max_latency_ms=max(r_lats, default=0.0),
-                        avg_queue_wait_ms=snap.requests.avg_queue_wait_ms,
-                        avg_backend_execution_ms=snap.requests.avg_execution_ms,
+                        avg_queue_wait_ms=(sum(r_waits) / len(r_waits)) if r_waits else 0.0,
+                        avg_backend_execution_ms=(sum(r_execs) / len(r_execs)) if r_execs else 0.0,
                         total_batches=snap.batches.total_batches,
                         avg_batch_size=snap.batches.avg_batch_size,
                         completed_requests=r_raw.completed_requests,
@@ -1216,13 +1473,13 @@ class VLLMValidator:
                 max_latency_ms=max_lat,
                 std_dev_latency_ms=std_dev_lat,
                 avg_queue_wait_ms=avg_q_wait,
-                p50_queue_wait_ms=0.0,
-                p95_queue_wait_ms=0.0,
-                p99_queue_wait_ms=0.0,
+                p50_queue_wait_ms=p50_q_wait,
+                p95_queue_wait_ms=p95_q_wait,
+                p99_queue_wait_ms=p99_q_wait,
                 avg_backend_execution_ms=avg_backend_exec,
-                p50_backend_execution_ms=0.0,
-                p95_backend_execution_ms=0.0,
-                p99_backend_execution_ms=0.0,
+                p50_backend_execution_ms=p50_backend_exec,
+                p95_backend_execution_ms=p95_backend_exec,
+                p99_backend_execution_ms=p99_backend_exec,
                 total_input_tokens=total_in,
                 total_output_tokens=total_out,
                 total_tokens=total_in + total_out,
@@ -1230,14 +1487,14 @@ class VLLMValidator:
                 avg_output_tokens_per_req=(total_out / comp_count) if comp_count > 0 else 0.0,
                 min_output_tokens=min_out,
                 max_output_tokens=max_out,
-                total_batches=batch_stats.total_batches,
-                avg_batch_size=batch_stats.avg_batch_size,
-                median_batch_size=batch_stats.avg_batch_size,
-                min_batch_size=batch_stats.min_batch_size,
-                max_batch_size_formed=batch_stats.max_batch_size,
+                total_batches=avg_total_batches,
+                avg_batch_size=avg_batch_size,
+                median_batch_size=avg_batch_size,
+                min_batch_size=min_batch_size_formed,
+                max_batch_size_formed=max_batch_size_formed,
                 batch_size_distribution=batch_size_dist,
-                avg_batch_formation_wait_ms=batch_stats.avg_batch_formation_wait_ms,
-                avg_batch_execution_ms=batch_stats.avg_batch_execution_ms,
+                avg_batch_formation_wait_ms=avg_batch_wait,
+                avg_batch_execution_ms=avg_batch_exec,
                 repetition_count=repetitions,
                 requests=req_records,
                 repetition_measurements=tuple(rep_measurements),

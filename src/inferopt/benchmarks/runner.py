@@ -75,6 +75,7 @@ class BenchmarkRunner:
 
         backend_name = getattr(backend, "backend_name", "unknown")
         completed_responses = tuple(r for r in raw_results if isinstance(r, InferenceResponse))
+        recent_req_metrics = collector.get_recent_requests(limit=len(raw_results) + 100)
 
         return BenchmarkResult(
             benchmark_id=f"bench-{uuid.uuid4().hex[:8]}",
@@ -105,6 +106,7 @@ class BenchmarkRunner:
             avg_batch_size=snapshot.batches.avg_batch_size,
             max_batch_size=snapshot.batches.max_batch_size,
             responses=completed_responses,
+            request_metrics=recent_req_metrics,
             metadata=dict(metadata or {}),
         )
 

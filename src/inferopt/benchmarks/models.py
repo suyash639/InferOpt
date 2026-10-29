@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from inferopt.core.models import InferenceRequest, InferenceResponse
 from inferopt.scheduler.config import BatchConfig, SchedulerConfig
-from inferopt.telemetry.models import MetricsSnapshot
+from inferopt.telemetry.models import MetricsSnapshot, RequestMetrics
 
 
 class ArrivalPattern(StrEnum):
@@ -345,6 +345,10 @@ class BenchmarkResult(BaseModel):
     responses: tuple[InferenceResponse, ...] = Field(
         default_factory=tuple,
         description="Completed inference response objects captured during the run.",
+    )
+    request_metrics: tuple[RequestMetrics, ...] = Field(
+        default_factory=tuple,
+        description="Granular per-request timing and lifecycle tracking records.",
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
